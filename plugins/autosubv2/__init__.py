@@ -643,7 +643,7 @@ class AutoSubv2(_PluginBase):
         logger.info(f"选中音轨信息：{audio_index}, {audio_lang}")
         return True, audio_index, audio_lang
 
-    def __get_video_prefer_subtitle(self, video_meta, prefer_lang=None, strict=False):
+    def __get_video_prefer_subtitle(self, video_meta, prefer_lang=None, strict=False, srt=True):
         """
         获取视频的首选字幕。优先级：1.字幕为偏好语言 2.默认字幕 3.第一个字幕
         :param video_meta: 视频元数据
@@ -694,7 +694,7 @@ class AutoSubv2(_PluginBase):
             if stream.get('disposition', {}).get('forced'):
                 continue
             # image-based 字幕，跳过
-            if (
+            if srt and (
                     'width' in stream
                     or stream.get('codec_name') in image_based_subtitle_codecs
             ):
@@ -937,7 +937,8 @@ class AutoSubv2(_PluginBase):
         video_meta = Ffmpeg().get_video_metadata(video_file)
         if not video_meta:
             return False
-        ret, subtitle_index, subtitle_lang = self.__get_video_prefer_subtitle(video_meta, prefer_lang=prefer_langs)
+        ret, subtitle_index, subtitle_lang = self.__get_video_prefer_subtitle(video_meta, prefer_lang=prefer_langs,
+                                                                              srt=False)
         if ret and subtitle_lang in prefer_langs:
             return True
 
