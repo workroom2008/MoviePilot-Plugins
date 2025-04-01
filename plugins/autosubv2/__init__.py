@@ -24,6 +24,7 @@ from plugins.autosubv2.ffmpeg import Ffmpeg
 from plugins.autosubv2.translate.openai import OpenAi
 from app.schemas.types import NotificationType
 
+
 # todo
 # 监听入库事件，自动调用翻译
 
@@ -1245,6 +1246,45 @@ class AutoSubv2(_PluginBase):
                                             'text': '翻译依赖 OpenAi 插件配置'
                                         }
                                     }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                },
+                                'content': [
+                                     {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'success',
+                                            'variant': 'tonal'
+                                        },
+                                        'content': [
+                                            {
+                                        'component': 'span',
+                                        'text': '详细说明参考：'
+                                        },
+                                        {
+                                            'component': 'a',
+                                            'props': {
+                                                'href': 'https://github.com/TimoYoung/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
+                                                'target': '_blank'
+                                            },
+                                            'content': [
+                                                {
+                                                    'component': 'u',
+                                                    'text': 'README'
+                                                }
+                                            ]
+                                        }]
+                                     }
+                                    
                                 ]
                             }
                         ]
