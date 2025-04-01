@@ -22,12 +22,9 @@ from app.plugins import _PluginBase
 from app.utils.system import SystemUtils
 from plugins.autosubv2.ffmpeg import Ffmpeg
 from plugins.autosubv2.translate.openai import OpenAi
-
+from app.schemas.types import NotificationType
 
 # todo
-# 优化字幕语言判断
-# llm多语言模型支持
-# UI重新设计
 # 监听入库事件，自动调用翻译
 
 class AutoSubv2(_PluginBase):
@@ -259,9 +256,6 @@ class AutoSubv2(_PluginBase):
                 self.skip_count += 1
                 return
             # 生成字幕
-            if self.send_notify:
-                self.post_message(title="自动字幕生成",
-                                  text=f" 媒体: {file_name}\n 开始处理文件 ... ")
             ret, lang, gen_sub_path = self.__generate_subtitle(video_file, file_path, self.enable_asr)
             if not ret:
                 message = f" 媒体: {file_name}\n "
@@ -273,15 +267,12 @@ class AutoSubv2(_PluginBase):
                     self.fail_count += 1
 
                 if self.send_notify:
-                    self.post_message(title="自动字幕生成", text=message)
+                    self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
                 return
 
             if self.translate_zh:
                 # 翻译字幕
                 logger.info(f"开始翻译字幕为中文 ...")
-                if self.send_notify:
-                    self.post_message(title="自动字幕生成",
-                                      text=f" 媒体: {file_name}\n 开始翻译字幕为中文 ... ")
                 # self.__translate_zh_subtitle(lang, f"{file_path}.{lang}.srt", f"{file_path}.zh.机翻.srt")
                 self.__translate_zh_subtitle(lang, gen_sub_path, f"{file_path}.zh.机翻.srt")
                 logger.info(f"翻译字幕完成：{file_name}.zh.机翻.srt")
@@ -293,14 +284,14 @@ class AutoSubv2(_PluginBase):
             message += f"耗时：{round(end_time - start_time, 2)}秒"
             logger.info(f"自动字幕生成 处理完成：{message}")
             if self.send_notify:
-                self.post_message(title="自动字幕生成", text=message)
+                self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
             self.success_count += 1
         except Exception as e:
             logger.error(f"自动字幕生成 处理异常：{e}")
             end_time = time.time()
             message = f" 媒体: {file_name}\n 处理失败\n 耗时：{round(end_time - start_time, 2)}秒"
             if self.send_notify:
-                self.post_message(title="自动字幕生成", text=message)
+                self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
             # 打印调用栈
             logger.debug(traceback.format_exc())
             self.fail_count += 1
@@ -979,10 +970,15 @@ class AutoSubv2(_PluginBase):
                                 },
                                 'content': [
                                     {
-                                        'component': 'VSwitch',
+                                        'component': 'VSelect',
                                         'props': {
-                                            'model': 'enable_asr',
-                                            'label': '允许从音轨提取字幕',
+                                            'model': 'translate_preference',
+                                            'label': '本地字幕提取策略',
+                                            'items': [
+                                                {'title': '仅英文字幕', 'value': 'english_only'},
+                                                {'title': '优先英文字幕', 'value': 'english_first'},
+                                                {'title': '优先原音字幕', 'value': 'origin_first'}
+                                            ]
                                         }
                                     }
                                 ]
@@ -1032,6 +1028,23 @@ class AutoSubv2(_PluginBase):
                                 },
                                 'content': [
                                     {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'enable_asr',
+                                            'label': '允许从音轨提取字幕',
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                    'md': 3,
+                                    'v-show': 'enable_asr'
+                                },
+                                'content': [
+                                    {
                                         'component': 'VSelect',
                                         'props': {
                                             'model': 'asr_engine',
@@ -1047,7 +1060,8 @@ class AutoSubv2(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 3,
+                                    'v-show': 'enable_asr'
                                 },
                                 'content': [
                                     {
@@ -1079,7 +1093,8 @@ class AutoSubv2(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 3,
+                                    'v-show': 'enable_asr'
                                 },
                                 'content': [
                                     {
@@ -1091,37 +1106,18 @@ class AutoSubv2(_PluginBase):
                                     }
                                 ]
                             },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'translate_preference',
-                                            'label': '源语言偏好',
-                                            'items': [
-                                                {'title': '仅英文', 'value': 'english_only'},
-                                                {'title': '优先英文', 'value': 'english_first'},
-                                                {'title': '优先原始语言', 'value': 'origin_first'}
-                                            ]
-                                        }
-                                    }
-                                ]
-                            },
                         ]
                     },
                     {
                         'component': 'VRow',
                         'content': [
+                           
                             {
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 3,
+                                    'v-show': 'translate_zh'
                                 },
                                 'content': [
                                     {
@@ -1137,7 +1133,8 @@ class AutoSubv2(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 3,
+                                    'v-show': 'translate_zh'
                                 },
                                 'content': [
                                     {
@@ -1154,7 +1151,8 @@ class AutoSubv2(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 3,
+                                    'v-show': 'translate_zh'
                                 },
                                 'content': [
                                     {
@@ -1171,7 +1169,8 @@ class AutoSubv2(_PluginBase):
                                 'component': 'VCol',
                                 'props': {
                                     'cols': 12,
-                                    'md': 3
+                                    'md': 3,
+                                    'v-show': 'translate_zh'
                                 },
                                 'content': [
                                     {
