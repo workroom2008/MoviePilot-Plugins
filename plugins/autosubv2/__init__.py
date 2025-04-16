@@ -1022,8 +1022,6 @@ class AutoSubv2(_PluginBase):
                             }
                         ]
                     },
-
-                    # 条件输入区（立即执行配置）
                     {
                         'component': 'VRow',
                         'props': {'v-show': 'run_now'},
@@ -1061,9 +1059,8 @@ class AutoSubv2(_PluginBase):
                     },
                     {
                         'component': 'VExpansionPanels',
-                        'props': {'variant': 'accordion'},
+                        'props': {'variant': 'accordion', 'multiple': True},
                         'content': [
-                            # 字幕策略面板
                             {
                                 'component': 'VExpansionPanel',
                                 'content': [
@@ -1156,7 +1153,7 @@ class AutoSubv2(_PluginBase):
                                                                 }
                                                             }
                                                         ]
-                                                    },
+                                                    }
                                                 ]
                                             }
                                         ]
