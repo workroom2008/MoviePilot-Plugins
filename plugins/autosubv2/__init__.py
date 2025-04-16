@@ -17,12 +17,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from lxml import etree
 
 from app.core.config import settings
+from app.core.context import MediaInfo
+from app.core.event import eventmanager, Event as MPEvent
+from app.schemas import TransferInfo, FileItem
+from app.schemas.types import NotificationType, EventType, MediaType
 from app.log import logger
 from app.plugins import _PluginBase
 from app.utils.system import SystemUtils
 from plugins.autosubv2.ffmpeg import Ffmpeg
 from plugins.autosubv2.translate.openai import OpenAi
-from app.schemas.types import NotificationType
 
 
 # todo
@@ -165,6 +168,21 @@ class AutoSubv2(_PluginBase):
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
                 self._scheduler.start()
+
+    # 监听媒体入库事件，每个事件触发一次自动字幕任务
+    @eventmanager.register(EventType.TransferComplete)
+    def on_transfer_complete(self, event: MPEvent):
+        """监听媒体入库事件"""
+        item = event.event_data
+        item_media: MediaInfo = item.get("mediainfo")
+        origin_lang = item_media.original_language
+        logger.info(f"origin_lang: {origin_lang}")
+        prefer_langs = ['zh', 'chi', 'zh-CN', 'chs', 'zhs', 'zh-Hans', 'zhong', 'simp', 'cn']
+        if origin_lang in prefer_langs:
+            logger.info(f"媒体原始语言为中文，跳过自动字幕")
+        item_transfer: TransferInfo = item.get("transferinfo")
+        item_file_list = item_transfer.file_list_new
+        logger.info(f"item_file_list: {item_file_list}")
 
     def _do_autosub(self, path_list: str):
         # 依次处理每个目录
@@ -1112,7 +1130,7 @@ class AutoSubv2(_PluginBase):
                     {
                         'component': 'VRow',
                         'content': [
-                           
+
                             {
                                 'component': 'VCol',
                                 'props': {
@@ -1259,7 +1277,7 @@ class AutoSubv2(_PluginBase):
                                     'cols': 12,
                                 },
                                 'content': [
-                                     {
+                                    {
                                         'component': 'VAlert',
                                         'props': {
                                             'type': 'success',
@@ -1267,24 +1285,24 @@ class AutoSubv2(_PluginBase):
                                         },
                                         'content': [
                                             {
-                                        'component': 'span',
-                                        'text': '详细说明参考：'
-                                        },
-                                        {
-                                            'component': 'a',
-                                            'props': {
-                                                'href': 'https://github.com/TimoYoung/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
-                                                'target': '_blank'
+                                                'component': 'span',
+                                                'text': '详细说明参考：'
                                             },
-                                            'content': [
-                                                {
-                                                    'component': 'u',
-                                                    'text': 'README'
-                                                }
-                                            ]
-                                        }]
-                                     }
-                                    
+                                            {
+                                                'component': 'a',
+                                                'props': {
+                                                    'href': 'https://github.com/TimoYoung/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
+                                                    'target': '_blank'
+                                                },
+                                                'content': [
+                                                    {
+                                                        'component': 'u',
+                                                        'text': 'README'
+                                                    }
+                                                ]
+                                            }]
+                                    }
+
                                 ]
                             }
                         ]
