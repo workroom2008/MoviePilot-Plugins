@@ -967,280 +967,92 @@ class AutoSubv2(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3
-                                },
+                                'props': {'cols': 12, 'md': 3},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'enabled',
+                                            'label': '启用插件',
+                                            'color': 'primary'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 3},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'listen_transfer_event',
+                                            'label': '媒体入库自动执行',
+                                            'hint': '监听媒体入库事件，自动执行字幕生成'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
                                         'props': {
                                             'model': 'run_now',
-                                            'label': '立即运行一次',
+                                            'label': '手动执行一次',
+                                            'color': 'secondary'
                                         }
                                     }
                                 ]
                             },
                             {
                                 'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'translate_preference',
-                                            'label': '本地字幕提取策略',
-                                            'items': [
-                                                {'title': '仅英文字幕', 'value': 'english_only'},
-                                                {'title': '优先英文字幕', 'value': 'english_first'},
-                                                {'title': '优先原音字幕', 'value': 'origin_first'}
-                                            ]
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'translate_zh',
-                                            'label': '翻译为中文',
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3
-                                },
+                                'props': {'cols': 12, 'md': 3},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
                                         'props': {
                                             'model': 'send_notify',
-                                            'label': '发送通知',
+                                            'label': '发送通知'
                                         }
                                     }
                                 ]
                             }
                         ]
                     },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'enable_asr',
-                                            'label': '允许从音轨提取字幕',
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'enable_asr'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'asr_engine',
-                                            'label': 'ASR引擎',
-                                            'items': [
-                                                {'title': 'faster-whisper', 'value': 'faster-whisper'}
-                                            ]
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'enable_asr'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'model': 'faster_whisper_model',
-                                            'label': '模型',
-                                            'items': [
-                                                {'title': 'tiny', 'value': 'tiny'},
-                                                {'title': 'tiny.en', 'value': 'tiny.en'},
-                                                {'title': 'base', 'value': 'base'},
-                                                {'title': 'base.en', 'value': 'base.en'},
-                                                {'title': 'small', 'value': 'small'},
-                                                {'title': 'small.en', 'value': 'small.en'},
-                                                {'title': 'medium', 'value': 'medium'},
-                                                {'title': 'large-v1', 'value': 'large-v1'},
-                                                {'title': 'large-v2', 'value': 'large-v2'},
-                                                {'title': 'large-v3', 'value': 'large-v3'},
-                                                {'title': 'distil-small.en', 'value': 'distil-small.en'},
-                                                {'title': 'distil-medium.en', 'value': 'distil-medium.en'},
-                                                {'title': 'distil-large-v2.en', 'value': 'distil-large-v2'},
-                                                {'title': 'distil-large-v3.en', 'value': 'distil-large-v3'},
-                                            ]
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'enable_asr'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'proxy',
-                                            'label': '使用代理下载模型',
-                                        }
-                                    }
-                                ]
-                            },
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
 
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'translate_zh'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'enable_batch',
-                                            'label': '启用批量翻译',
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'translate_zh'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'batch_size',
-                                            'label': '每批翻译行数',
-                                            'placeholder': '20'
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'translate_zh'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'context_window',
-                                            'label': '上下文窗口大小',
-                                            'placeholder': '5'
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 3,
-                                    'v-show': 'translate_zh'
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextField',
-                                        'props': {
-                                            'model': 'max_retries',
-                                            'label': 'llm请求重试次数',
-                                            'placeholder': '3'
-                                        }
-                                    }
-                                ]
-                            },
-                        ]
-                    },
+                    # 条件输入区（立即执行配置）
                     {
                         'component': 'VRow',
+                        'props': {'v-show': 'run_now'},
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
+                                'props': {'cols': 12, 'md': 8},
                                 'content': [
                                     {
                                         'component': 'VTextarea',
                                         'props': {
                                             'model': 'path_list',
                                             'label': '媒体路径',
-                                            'rows': 5,
-                                            'placeholder': '媒体文件或文件夹绝对路径（如为文件夹会遍历其中所有媒体文件），每行一个路径，请确保路径正确'
+                                            'rows': 3,
+                                            'placeholder': '绝对路径，每行一个。支持文件和文件夹'
                                         }
                                     }
                                 ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
+                            },
                             {
                                 'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
+                                'props': {'cols': 12, 'md': 4},
                                 'content': [
                                     {
                                         'component': 'VTextField',
                                         'props': {
                                             'model': 'file_size',
-                                            'label': '文件大小（MB）',
-                                            'placeholder': '单位 MB, 大于该大小的文件才会进行字幕生成'
+                                            'label': '最小文件大小(MB)',
+                                            'placeholder': '默认0'
                                         }
                                     }
                                 ]
@@ -1248,21 +1060,202 @@ class AutoSubv2(_PluginBase):
                         ]
                     },
                     {
-                        'component': 'VRow',
+                        'component': 'VExpansionPanels',
+                        'props': {'variant': 'accordion'},
                         'content': [
+                            # 字幕策略面板
                             {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
+                                'component': 'VExpansionPanel',
                                 'content': [
                                     {
-                                        'component': 'VAlert',
-                                        'props': {
-                                            'type': 'info',
-                                            'variant': 'tonal',
-                                            'text': '翻译依赖 OpenAi 插件配置'
-                                        }
+                                        'component': 'VExpansionPanelTitle',
+                                        'text': '字幕生成设置'
+                                    },
+                                    {
+                                        'component': 'VExpansionPanelText',
+                                        'content': [
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSelect',
+                                                                'props': {
+                                                                    'model': 'translate_preference',
+                                                                    'label': '字幕源语言偏好',
+                                                                    'hint': '小语种视频存在多语言字幕/音轨时，优先选择哪种语言用于翻译',
+                                                                    'items': [
+                                                                        {'title': '仅英文', 'value': 'english_only'},
+                                                                        {'title': '英文优先', 'value': 'english_first'},
+                                                                        {'title': '原音优先', 'value': 'origin_first'}
+                                                                    ]
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'enable_asr',
+                                                                    'label': '允许从音轨生成字幕'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'translate_zh',
+                                                                    'label': '翻译成中文',
+                                                                    'hint': '需要配置OpenAI插件'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4, 'v-show': 'enable_asr'},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSelect',
+                                                                'props': {
+                                                                    'model': 'faster_whisper_model',
+                                                                    'label': 'faster-whisper模型选择',
+                                                                    'items': ['tiny', 'base', 'small', 'medium',
+                                                                              'large-v3']
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4, 'v-show': 'enable_asr'},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'proxy',
+                                                                    'hint': '需配置MP环境变量PROXY_HOST',
+                                                                    'label': '使用代理下载模型'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VExpansionPanel',
+                                'props': {'v-show': 'translate_zh'},
+                                'content': [
+                                    {
+                                        'component': 'VExpansionPanelTitle',
+                                        'text': '大模型翻译设置'
+                                    },
+                                    {
+                                        'component': 'VExpansionPanelText',
+                                        'content': [
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 3},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'enable_batch',
+                                                                    'label': '启用批量翻译'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 3, 'v-show': 'enable_batch'},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'batch_size',
+                                                                    'label': '每批翻译行数',
+                                                                    'placeholder': '20'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 3},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'context_window',
+                                                                    'label': '上下文窗口大小',
+                                                                    'placeholder': '5'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 3},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'max_retries',
+                                                                    'label': 'llm请求重试次数',
+                                                                    'placeholder': '3'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VAlert',
+                                                                'props': {
+                                                                    'type': 'info',
+                                                                    'variant': 'tonal',
+                                                                    'text': '翻译依赖 OpenAi 插件配置'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
                                     }
                                 ]
                             }
@@ -1273,15 +1266,13 @@ class AutoSubv2(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
+                                'props': {'cols': 12},
                                 'content': [
                                     {
                                         'component': 'VAlert',
                                         'props': {
                                             'type': 'success',
-                                            'variant': 'tonal'
+                                            'variant': 'tonal',
                                         },
                                         'content': [
                                             {
@@ -1302,7 +1293,6 @@ class AutoSubv2(_PluginBase):
                                                 ]
                                             }]
                                     }
-
                                 ]
                             }
                         ]
@@ -1310,20 +1300,22 @@ class AutoSubv2(_PluginBase):
                 ]
             }
         ], {
+            "enabled": False,
+            "listen_transfer_event": True,
             "run_now": False,
+            "path_list": "",
+            "file_size": "10",
             "send_notify": False,
-            "translate_zh": True,
+            "translate_preference": "english_first",
             "enable_asr": True,
+            "translate_zh": True,
             "asr_engine": "faster-whisper",
             "faster_whisper_model": "base",
             "proxy": True,
-            "translate_preference": "origin_first",
             "enable_batch": True,
             "batch_size": 20,
             "context_window": 5,
-            "max_retries": 3,
-            "path_list": "",
-            "file_size": "10",
+            "max_retries": 3
         }
 
     def get_api(self) -> List[Dict[str, Any]]:
