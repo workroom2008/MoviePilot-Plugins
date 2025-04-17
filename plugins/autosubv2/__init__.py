@@ -1135,7 +1135,7 @@ class AutoSubv2(_PluginBase):
                                                                     'model': 'faster_whisper_model',
                                                                     'label': 'faster-whisper模型选择',
                                                                     'items': ['tiny', 'base', 'small', 'medium',
-                                                                              'large-v3']
+                                                                              'large-v3-turbo', 'large-v3']
                                                                 }
                                                             }
                                                         ]
@@ -1269,7 +1269,7 @@ class AutoSubv2(_PluginBase):
                                         'component': 'VAlert',
                                         'props': {
                                             'type': 'success',
-                                            'variant': 'tonal',
+                                            'variant': 'tonal'
                                         },
                                         'content': [
                                             {
@@ -1288,7 +1288,8 @@ class AutoSubv2(_PluginBase):
                                                         'text': 'README'
                                                     }
                                                 ]
-                                            }]
+                                            }
+                                        ]
                                     }
                                 ]
                             }
