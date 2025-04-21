@@ -1135,7 +1135,10 @@ class AutoSubv2(_PluginBase):
                                                                     'model': 'faster_whisper_model',
                                                                     'label': 'faster-whisper模型选择',
                                                                     'items': ['tiny', 'base', 'small', 'medium',
-                                                                              'large-v3-turbo', 'large-v3']
+                                                                              'large-v3',
+                                                                              {'title': 'large-v3-turbo',
+                                                                               'value': 'deepdml/faster-whisper-large-v3-turbo-ct2'},
+                                                                              ]
                                                                 }
                                                             }
                                                         ]
