@@ -31,6 +31,10 @@ from plugins.autosubv2.translate.openai import OpenAi
 # todo
 # 监听入库事件，自动调用翻译
 
+class UserInterruptException(Exception):
+    """用户中断当前任务的异常"""
+    pass
+
 class AutoSubv2(_PluginBase):
     # 插件名称
     plugin_name = "AI字幕自动生成(v2)"
@@ -41,7 +45,7 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.2"
     # 插件作者
     plugin_author = "TimoYoung"
     # 作者主页
@@ -217,6 +221,7 @@ class AutoSubv2(_PluginBase):
 
         except Exception as e:
             logger.error(f"处理异常: {e}")
+            logger.error(traceback.format_exc())
         finally:
             logger.info(f"处理完成: "
                         f"成功{self.success_count} / 跳过{self.skip_count} / 失败{self.fail_count} / 共{self.process_count}")
@@ -226,7 +231,7 @@ class AutoSubv2(_PluginBase):
         if self.asr_engine == 'whisper.cpp':
             if not self.whisper_main or not self.whisper_model:
                 logger.warn(f"配置信息不完整，不进行处理")
-                return
+                return False
             if not os.path.exists(self.whisper_main):
                 logger.warn(f"whisper.cpp主程序不存在，不进行处理")
                 return False
@@ -240,7 +245,7 @@ class AutoSubv2(_PluginBase):
         elif self.asr_engine == 'faster-whisper':
             if not self.faster_whisper_model_path or not self.faster_whisper_model:
                 logger.warn(f"配置信息不完整，不进行处理")
-                return
+                return False
             if not os.path.exists(self.faster_whisper_model_path):
                 logger.info(f"创建faster-whisper模型目录：{self.faster_whisper_model_path}")
                 os.mkdir(self.faster_whisper_model_path)
@@ -305,6 +310,9 @@ class AutoSubv2(_PluginBase):
             if self.send_notify:
                 self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
             self.success_count += 1
+        except UserInterruptException:
+            logger.info(f"用户中断当前任务：{video_file}")
+            self.fail_count += 1
         except Exception as e:
             logger.error(f"自动字幕生成 处理异常：{e}")
             end_time = time.time()
@@ -312,7 +320,7 @@ class AutoSubv2(_PluginBase):
             if self.send_notify:
                 self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
             # 打印调用栈
-            logger.debug(traceback.format_exc())
+            logger.error(traceback.format_exc())
             self.fail_count += 1
 
     def __process_folder_subtitle(self, path):
@@ -382,7 +390,7 @@ class AutoSubv2(_PluginBase):
                     for segment in segments:
                         if self._event.is_set():
                             logger.info(f"whisper音轨转录服务停止")
-                            raise Exception(f"用户中断当前任务")
+                            raise UserInterruptException(f"用户中断当前任务")
                         for word in segment.words:
                             idx += 1
                             subs.append(srt.Subtitle(index=idx,
@@ -394,7 +402,7 @@ class AutoSubv2(_PluginBase):
                     for i, segment in enumerate(segments):
                         if self._event.is_set():
                             logger.info(f"whisper音轨转录服务停止")
-                            raise Exception(f"用户中断当前任务")
+                            raise UserInterruptException(f"用户中断当前任务")
                         subs.append(srt.Subtitle(index=i,
                                                  start=timedelta(seconds=segment.start),
                                                  end=timedelta(seconds=segment.end),
@@ -767,9 +775,8 @@ class AutoSubv2(_PluginBase):
         context = self.__get_context(all_subs, indices, is_batch=True) if self.context_window > 0 else None
         batch_text = '\n'.join([item.content for item in batch])
 
-        openai = OpenAi(self._openai_key, self._openai_url, self._openai_proxy, self._openai_model)
         try:
-            ret, result = openai.translate_to_zh(batch_text, context)
+            ret, result = self.openai.translate_to_zh(batch_text, context)
             if not ret:
                 raise Exception(result)
 
@@ -788,11 +795,10 @@ class AutoSubv2(_PluginBase):
 
     def __process_single(self, all_subs: List[srt.Subtitle], item: srt.Subtitle) -> srt.Subtitle:
         """单条处理逻辑"""
-        openai = OpenAi(self._openai_key, self._openai_url, self._openai_proxy, self._openai_model)
         for _ in range(self.max_retries):
             idx = all_subs.index(item)
             context = self.__get_context(all_subs, [idx], is_batch=False) if self.context_window > 0 else None
-            success, trans = openai.translate_to_zh(item.content, context)
+            success, trans = self.openai.translate_to_zh(item.content, context)
 
             if success:
                 item.content = f"{trans}\n{item.content}"
@@ -807,8 +813,11 @@ class AutoSubv2(_PluginBase):
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        valid_subs = self.__merge_srt(subs)
-        logger.info(f"合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
+        if source_lang in ["en", "eng"]:    
+            valid_subs = self.__merge_srt(subs)
+            logger.info(f"英文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
+        else:
+            valid_subs = subs
         self._stats['total'] = len(valid_subs)
         processed = []
         current_batch = []
@@ -816,7 +825,7 @@ class AutoSubv2(_PluginBase):
         for item in valid_subs:
             if self._event.is_set():
                 logger.info(f"字幕{source_subtitle}翻译停止")
-                raise Exception(f"用户中断当前任务")
+                raise UserInterruptException(f"用户中断当前任务")
             current_batch.append(item)
 
             if len(current_batch) >= self.batch_size:
