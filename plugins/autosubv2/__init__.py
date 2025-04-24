@@ -57,114 +57,88 @@ class AutoSubv2(_PluginBase):
     # 可使用的用户级别
     auth_level = 2
 
-    # 退出事件
-    _event = Event()
     # 私有属性
     _running = False
-    # 语句结束符
-    _end_token = ['.', '!', '?', '。', '！', '？', '。"', '！"', '？"', '."', '!"', '?"']
-    _noisy_token = [('(', ')'), ('[', ']'), ('{', '}'), ('【', '】'), ('♪', '♪'), ('♫', '♫'), ('♪♪', '♪♪')]
-
-    def __init__(self):
-        super().__init__()
-        # ChatGPT
-        self.openai = None
-        self._openai_key = None
-        self._openai_url = None
-        self._openai_proxy = None
-        self._openai_model = None
-        self._scheduler = None
-        self.process_count = None
-        self.fail_count = None
-        self.success_count = None
-        self.skip_count = None
-        self.faster_whisper_model_path = None
-        self.faster_whisper_model = None
-        self.asr_engine = None
-        self.send_notify = None
-        self.additional_args = None
-        self.enable_asr = None
-        self.translate_zh = None
-        self.whisper_model = None
-        self.whisper_main = None
-        self.file_size = None
-        self.enable_batch = None
-        self.batch_size = None
-        self.context_window = None
-        self.max_retries = None
-        self._proxy = None
-        self._translate_preference = None
+    _event = Event() # 退出事件
+    _scheduler = None
+    _enabled = None
+    _listen_transfer_event = None
+    _send_notify = None
+    _translate_preference = None
+    _run_now = None
+    _path_list = None
+    _file_size = None
+    _translate_zh = None
+    _openai = None
+    _enable_batch = None
+    _batch_size = None
+    _context_window = None
+    _max_retries = None
+    _enable_asr = None
+    _huggingface_proxy = None
+    _faster_whisper_model_path = None
+    _faster_whisper_model = None
 
     def init_plugin(self, config=None):
-
-        self.process_count = 0
-        self.skip_count = 0
-        self.fail_count = 0
-        self.success_count = 0
-
         # 如果没有配置信息， 则不处理
         if not config:
             return
-
-        self.translate_zh = config.get('translate_zh', False)
-        if self.translate_zh:
+        self._enabled = config.get('enabled', False)
+        self._listen_transfer_event = config.get('listen_transfer_event', True)
+        self._run_now = config.get('run_now')
+        if self._run_now:
+            self._path_list = list(set(config.get('path_list').split('\n')))
+            self._file_size = int(config.get('file_size')) if config.get('file_size') else 10
+        self._send_notify = config.get('send_notify', False)
+        # 字幕生成设置
+        self._translate_preference = config.get('translate_preference', 'origin_first')
+        self._enable_asr = config.get('enable_asr', True)
+        if self._enable_asr:
+            self._faster_whisper_model = config.get('faster_whisper_model', 'base')
+            self._faster_whisper_model_path = config.get('faster_whisper_model_path',
+                                                        self.get_data_path() / "faster-whisper-models")
+            self._huggingface_proxy = config.get('proxy', False)
+        self._translate_zh = config.get('translate_zh', False)
+        if self._translate_zh:
             chatgpt = self.get_config("ChatGPT")
             if not chatgpt:
                 logger.error(f"翻译依赖于ChatGPT，请先维护ChatGPT插件")
                 return
-            self._openai_key = chatgpt and chatgpt.get("openai_key")
-            self._openai_url = chatgpt and chatgpt.get("openai_url")
-            self._openai_proxy = chatgpt and chatgpt.get("proxy")
-            self._openai_model = chatgpt and chatgpt.get("model")
-            if not self._openai_key:
+            openai_key = chatgpt and chatgpt.get("openai_key")
+            openai_url = chatgpt and chatgpt.get("openai_url")
+            openai_proxy = chatgpt and chatgpt.get("proxy")
+            openai_model = chatgpt and chatgpt.get("model")
+            if not openai_key:
                 logger.error(f"翻译依赖于ChatGPT，请先维护openai_key")
                 return
-            self.openai = OpenAi(api_key=self._openai_key, api_url=self._openai_url,
-                                 proxy=settings.PROXY if self._openai_proxy else None,
-                                 model=self._openai_model)
+            self.openai = OpenAi(api_key=openai_key, api_url=openai_url,
+                                 proxy=settings.PROXY if openai_proxy else None,
+                                 model=openai_model)
+            self._enable_batch = config.get('enable_batch', True)
+            self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 20
+            self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
+            self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
 
-        path_list = list(set(config.get('path_list').split('\n')))
-        self.file_size = int(config.get('file_size')) if config.get('file_size') else 10
-        self.whisper_main = config.get('whisper_main')
-        self.whisper_model = config.get('whisper_model')
-        self.enable_asr = config.get('enable_asr', True)
-        self.enable_batch = config.get('enable_batch', True)
-        self.batch_size = int(config.get('batch_size')) if config.get('batch_size') else 20
-        self.context_window = int(config.get('context_window')) if config.get('context_window') else 5
-        self.max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
-        self.additional_args = config.get('additional_args', '-t 4 -p 1')
-        self.send_notify = config.get('send_notify', False)
-        self.asr_engine = config.get('asr_engine', 'faster_whisper')
-        self.faster_whisper_model = config.get('faster_whisper_model', 'base')
-        self.faster_whisper_model_path = config.get('faster_whisper_model_path',
-                                                    self.get_data_path() / "faster-whisper-models")
-        self._proxy = config.get('proxy', False)
-        self._translate_preference = config.get('translate_preference', 'origin_first')
-        run_now = config.get('run_now')
         self.stop_service()
 
-        if not run_now:
-            return
-
-        config['run_now'] = False
-        self.update_config(config)
-        # 如果没有配置信息， 则不处理
-        if not path_list or not self.file_size:
-            logger.warn(f"配置信息不完整，不进行处理")
+        if not self._enabled:
             return
 
         # asr 配置检查
-        if self.enable_asr and not self.__check_asr():
+        if self._enable_asr and not self.__check_asr():
             return
 
         if self._running:
             logger.warn(f"上一次任务还未完成，不进行处理")
             return
 
-        if run_now:
+        if self._run_now:
+            config['run_now'] = False
+            self.update_config(config)
+
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
             logger.info("AI字幕自动生成任务，立即运行一次")
-            self._scheduler.add_job(func=self._do_autosub, kwargs={'path_list': path_list}, trigger='date',
+            self._scheduler.add_job(func=self._do_autosub, kwargs={'path_list': self._path_list}, trigger='date',
                                     run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
                                     name="AI字幕自动生成")
 
@@ -192,7 +166,6 @@ class AutoSubv2(_PluginBase):
         # 依次处理每个目录
         try:
             self._running = True
-            self.success_count = self.skip_count = self.fail_count = self.process_count = 0
             for path in path_list:
                 if self._event.is_set():
                     logger.info(f"字幕生成服务停止")
@@ -223,51 +196,31 @@ class AutoSubv2(_PluginBase):
             logger.error(f"处理异常: {e}")
             logger.error(traceback.format_exc())
         finally:
-            logger.info(f"处理完成: "
-                        f"成功{self.success_count} / 跳过{self.skip_count} / 失败{self.fail_count} / 共{self.process_count}")
+            logger.info(f"处理完成")
             self._running = False
 
     def __check_asr(self):
-        if self.asr_engine == 'whisper.cpp':
-            if not self.whisper_main or not self.whisper_model:
-                logger.warn(f"配置信息不完整，不进行处理")
-                return False
-            if not os.path.exists(self.whisper_main):
-                logger.warn(f"whisper.cpp主程序不存在，不进行处理")
-                return False
-            if not os.path.exists(self.whisper_model):
-                logger.warn(f"whisper.cpp模型文件不存在，不进行处理")
-                return False
-            # 校验扩展参数是否包含异常字符
-            if self.additional_args and re.search(r'[;|&]', self.additional_args):
-                logger.warn(f"扩展参数包含异常字符，不进行处理")
-                return False
-        elif self.asr_engine == 'faster-whisper':
-            if not self.faster_whisper_model_path or not self.faster_whisper_model:
-                logger.warn(f"配置信息不完整，不进行处理")
-                return False
-            if not os.path.exists(self.faster_whisper_model_path):
-                logger.info(f"创建faster-whisper模型目录：{self.faster_whisper_model_path}")
-                os.mkdir(self.faster_whisper_model_path)
-            try:
-                from faster_whisper import WhisperModel, download_model
-            except ImportError:
-                logger.warn(f"faster-whisper 未安装，不进行处理")
-                return False
-            return True
-        else:
-            logger.warn(f"未配置asr引擎，不进行处理")
+        if not self._faster_whisper_model_path or not self._faster_whisper_model:
+            logger.warn(f"faster-whisper配置信息不完整，不进行处理")
+            return False
+        if not os.path.exists(self._faster_whisper_model_path):
+            logger.info(f"创建faster-whisper模型目录：{self._faster_whisper_model_path}")
+            os.mkdir(self._faster_whisper_model_path)
+        try:
+            from faster_whisper import WhisperModel, download_model
+        except ImportError:
+            logger.warn(f"faster-whisper 未安装，不进行处理")
             return False
         return True
+       
 
     def __process_file_subtitle(self, video_file):
         if not video_file:
             return
         # 如果文件大小小于指定大小， 则不处理
-        if os.path.getsize(video_file) < self.file_size:
+        if os.path.getsize(video_file) < self._file_size:
             return
 
-        self.process_count += 1
         start_time = time.time()
         file_path, file_ext = os.path.splitext(video_file)
         file_name = os.path.basename(video_file)
@@ -277,24 +230,20 @@ class AutoSubv2(_PluginBase):
             # 判断目的字幕（和内嵌）是否已存在
             if self.__target_subtitle_exists(video_file):
                 logger.warn(f"字幕文件已经存在，不进行处理")
-                self.skip_count += 1
                 return
             # 生成字幕
-            ret, lang, gen_sub_path = self.__generate_subtitle(video_file, file_path, self.enable_asr)
+            ret, lang, gen_sub_path = self.__generate_subtitle(video_file, file_path, self._enable_asr)
             if not ret:
                 message = f" 媒体: {file_name}\n "
-                if not self.enable_asr:
+                if not self._enable_asr:
                     message += "内嵌&外挂字幕不存在，不进行翻译"
-                    self.skip_count += 1
                 else:
                     message += "生成字幕失败，跳过后续处理"
-                    self.fail_count += 1
-
-                if self.send_notify:
+                if self._send_notify:
                     self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
                 return
 
-            if self.translate_zh:
+            if self._translate_zh:
                 # 翻译字幕
                 logger.info(f"开始翻译字幕为中文 ...")
                 # self.__translate_zh_subtitle(lang, f"{file_path}.{lang}.srt", f"{file_path}.zh.机翻.srt")
@@ -303,25 +252,22 @@ class AutoSubv2(_PluginBase):
 
             end_time = time.time()
             message = f" 媒体: {file_name}\n 处理完成\n 字幕原始语言: {lang}\n "
-            if self.translate_zh:
+            if self._translate_zh:
                 message += f"字幕翻译语言: zh\n "
             message += f"耗时：{round(end_time - start_time, 2)}秒"
             logger.info(f"自动字幕生成 处理完成：{message}")
-            if self.send_notify:
+            if self._send_notify:
                 self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
-            self.success_count += 1
         except UserInterruptException:
             logger.info(f"用户中断当前任务：{video_file}")
-            self.fail_count += 1
         except Exception as e:
             logger.error(f"自动字幕生成 处理异常：{e}")
             end_time = time.time()
             message = f" 媒体: {file_name}\n 处理失败\n 耗时：{round(end_time - start_time, 2)}秒"
-            if self.send_notify:
+            if self._send_notify:
                 self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
             # 打印调用栈
             logger.error(traceback.format_exc())
-            self.fail_count += 1
 
     def __process_folder_subtitle(self, path):
         """
@@ -344,80 +290,64 @@ class AutoSubv2(_PluginBase):
         :return:
         """
         lang = audio_lang
-        if self.asr_engine == 'whisper.cpp':
-            command = [self.whisper_main] + self.additional_args.split()
-            command += ['-l', lang, '-m', self.whisper_model, '-osrt', '-of', audio_file, audio_file]
-            ret = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            if ret.returncode == 0:
-                if lang == 'auto':
-                    # 从output中获取语言 "whisper_full_with_state: auto-detected language: en (p = 0.973642)"
-                    output = ret.stdout.decode('utf-8') if ret.stdout else ""
-                    lang = re.search(r"auto-detected language: (\w+)", output)
-                    if lang and lang.group(1):
-                        lang = lang.group(1)
-                    else:
-                        lang = "en"
-                return True, lang
-        elif self.asr_engine == 'faster-whisper':
-            try:
-                from faster_whisper import WhisperModel, download_model
-                # 设置缓存目录, 防止缓存同目录出现 cross-device 错误
-                cache_dir = os.path.join(self.faster_whisper_model_path, "cache")
-                if not os.path.exists(cache_dir):
-                    os.mkdir(cache_dir)
-                os.environ["HF_HUB_CACHE"] = cache_dir
-                if self._proxy:
-                    os.environ["HTTP_PROXY"] = settings.PROXY['http']
-                    os.environ["HTTPS_PROXY"] = settings.PROXY['https']
-                model = WhisperModel(
-                    download_model(self.faster_whisper_model, local_files_only=False, cache_dir=cache_dir),
-                    device="cpu", compute_type="int8", cpu_threads=psutil.cpu_count(logical=False))
-                segments, info = model.transcribe(audio_file,
-                                                  language=lang if lang != 'auto' else None,
-                                                  word_timestamps=True,
-                                                  vad_filter=True,
-                                                  temperature=0,
-                                                  beam_size=5)
-                logger.info("Detected language '%s' with probability %f" % (info.language, info.language_probability))
+        try:
+            from faster_whisper import WhisperModel, download_model
+            # 设置缓存目录, 防止缓存同目录出现 cross-device 错误
+            cache_dir = os.path.join(self._faster_whisper_model_path, "cache")
+            if not os.path.exists(cache_dir):
+                os.mkdir(cache_dir)
+            os.environ["HF_HUB_CACHE"] = cache_dir
+            if self._huggingface_proxy:
+                os.environ["HTTP_PROXY"] = settings.PROXY['http']
+                os.environ["HTTPS_PROXY"] = settings.PROXY['https']
+            model = WhisperModel(
+                download_model(self._faster_whisper_model, local_files_only=False, cache_dir=cache_dir),
+                device="cpu", compute_type="int8", cpu_threads=psutil.cpu_count(logical=False))
+            segments, info = model.transcribe(audio_file,
+                                                language=lang if lang != 'auto' else None,
+                                                word_timestamps=True,
+                                                vad_filter=True,
+                                                temperature=0,
+                                                beam_size=5)
+            logger.info("Detected language '%s' with probability %f" % (info.language, info.language_probability))
 
-                if lang == 'auto':
-                    lang = info.language
+            if lang == 'auto':
+                lang = info.language
 
-                subs = []
-                if lang in ['en', 'eng']:
-                    # 英文先生成单词级别字幕，再合并
-                    idx = 0
-                    for segment in segments:
-                        if self._event.is_set():
-                            logger.info(f"whisper音轨转录服务停止")
-                            raise UserInterruptException(f"用户中断当前任务")
-                        for word in segment.words:
-                            idx += 1
-                            subs.append(srt.Subtitle(index=idx,
-                                                     start=timedelta(seconds=word.start),
-                                                     end=timedelta(seconds=word.end),
-                                                     content=word.word))
-                    subs = self.__merge_srt(subs)
-                else:
-                    for i, segment in enumerate(segments):
-                        if self._event.is_set():
-                            logger.info(f"whisper音轨转录服务停止")
-                            raise UserInterruptException(f"用户中断当前任务")
-                        subs.append(srt.Subtitle(index=i,
-                                                 start=timedelta(seconds=segment.start),
-                                                 end=timedelta(seconds=segment.end),
-                                                 content=segment.text))
-                self.__save_srt(f"{audio_file}.srt", subs)
-                logger.info(f"音轨转字幕完成")
-                return True, lang
-            except ImportError:
-                logger.warn(f"faster-whisper 未安装，不进行处理")
-                return False, None
-            except Exception as e:
-                traceback.print_exc()
-                logger.error(f"faster-whisper 处理异常：{e}")
-                return False, None
-        return False, None
+            subs = []
+            if lang in ['en', 'eng']:
+                # 英文先生成单词级别字幕，再合并
+                idx = 0
+                for segment in segments:
+                    if self._event.is_set():
+                        logger.info(f"whisper音轨转录服务停止")
+                        raise UserInterruptException(f"用户中断当前任务")
+                    for word in segment.words:
+                        idx += 1
+                        subs.append(srt.Subtitle(index=idx,
+                                                    start=timedelta(seconds=word.start),
+                                                    end=timedelta(seconds=word.end),
+                                                    content=word.word))
+                subs = self.__merge_srt(subs)
+            else:
+                for i, segment in enumerate(segments):
+                    if self._event.is_set():
+                        logger.info(f"whisper音轨转录服务停止")
+                        raise UserInterruptException(f"用户中断当前任务")
+                    subs.append(srt.Subtitle(index=i,
+                                                start=timedelta(seconds=segment.start),
+                                                end=timedelta(seconds=segment.end),
+                                                content=segment.text))
+            self.__save_srt(f"{audio_file}.srt", subs)
+            logger.info(f"音轨转字幕完成")
+            return True, lang
+        except ImportError:
+            logger.warn(f"faster-whisper 未安装，不进行处理")
+            return False, None
+        except Exception as e:
+            traceback.print_exc()
+            logger.error(f"faster-whisper 处理异常：{e}")
+            return False, None
 
     def __generate_subtitle(self, video_file, subtitle_file, enable_asr=True):
         """
@@ -591,7 +521,7 @@ class AutoSubv2(_PluginBase):
         # 合并字幕
         merged_subtitle = []
         sentence_end = True
-
+        end_tokens = ['.', '!', '?', '。', '！', '？', '。"', '！"', '？"', '."', '!"', '?"']
         for index, item in enumerate(subtitle_data):
             # 当前字幕先将多行合并为一行，再去除首尾空格
             content = item.content.replace('\n', ' ').strip()
@@ -616,7 +546,7 @@ class AutoSubv2(_PluginBase):
                 merged_subtitle[-1].end = item.end
 
             # 如果当前字幕内容以标志符结尾，则设置语句已经终结
-            if content.endswith(tuple(self._end_token)):
+            if content.endswith(tuple(end_tokens)):
                 sentence_end = True
             # 如果上句字幕超过一定长度，则设置语句已经终结
             elif len(merged_subtitle[-1].content) > 80:
@@ -748,12 +678,13 @@ class AutoSubv2(_PluginBase):
         :param content:
         :return:
         """
-        return any(content.startswith(t[0]) and content.endswith(t[1]) for t in self._noisy_token)
+        noisy_tokens = [('(', ')'), ('[', ']'), ('{', '}'), ('【', '】'), ('♪', '♪'), ('♫', '♫'), ('♪♪', '♪♪')]
+        return any(content.startswith(t[0]) and content.endswith(t[1]) for t in noisy_tokens)
 
     def __get_context(self, all_subs: list, target_indices: List[int], is_batch: bool) -> str:
         """通用上下文获取方法"""
-        min_idx = max(0, min(target_indices) - self.context_window)
-        max_idx = min(len(all_subs) - 1, max(target_indices) + self.context_window) if is_batch else min(target_indices)
+        min_idx = max(0, min(target_indices) - self._context_window)
+        max_idx = min(len(all_subs) - 1, max(target_indices) + self._context_window) if is_batch else min(target_indices)
 
         context = []
         for idx in range(min_idx, max_idx + 1):
@@ -765,14 +696,14 @@ class AutoSubv2(_PluginBase):
 
     def __process_items(self, all_subs: list, items: list) -> list:
         """统一处理入口（支持批量和单条）"""
-        if self.enable_batch and len(items) > 1:
+        if self._enable_batch and len(items) > 1:
             return self.__process_batch(all_subs, items)
         return [self.__process_single(all_subs, item) for item in items]
 
     def __process_batch(self, all_subs: list, batch: list) -> list:
         """批量处理逻辑"""
         indices = [all_subs.index(item) for item in batch]
-        context = self.__get_context(all_subs, indices, is_batch=True) if self.context_window > 0 else None
+        context = self.__get_context(all_subs, indices, is_batch=True) if self._context_window > 0 else None
         batch_text = '\n'.join([item.content for item in batch])
 
         try:
@@ -795,9 +726,9 @@ class AutoSubv2(_PluginBase):
 
     def __process_single(self, all_subs: List[srt.Subtitle], item: srt.Subtitle) -> srt.Subtitle:
         """单条处理逻辑"""
-        for _ in range(self.max_retries):
+        for _ in range(self._max_retries):
             idx = all_subs.index(item)
-            context = self.__get_context(all_subs, [idx], is_batch=False) if self.context_window > 0 else None
+            context = self.__get_context(all_subs, [idx], is_batch=False) if self._context_window > 0 else None
             success, trans = self.openai.translate_to_zh(item.content, context)
 
             if success:
@@ -828,7 +759,7 @@ class AutoSubv2(_PluginBase):
                 raise UserInterruptException(f"用户中断当前任务")
             current_batch.append(item)
 
-            if len(current_batch) >= self.batch_size:
+            if len(current_batch) >= self._batch_size:
                 processed += self.__process_items(valid_subs, current_batch)
                 current_batch = []
                 logger.info(f"进度: {len(processed)}/{len(valid_subs)}")
@@ -935,7 +866,7 @@ class AutoSubv2(_PluginBase):
         :param video_file:
         :return:
         """
-        if self.translate_zh:
+        if self._translate_zh:
             prefer_langs = ['zh', 'chi', 'zh-CN', 'chs', 'zhs', 'zh-Hans', 'zhong', 'simp', 'cn']
             strict = True
         else:
@@ -1319,7 +1250,6 @@ class AutoSubv2(_PluginBase):
             "translate_preference": "english_first",
             "enable_asr": True,
             "translate_zh": True,
-            "asr_engine": "faster-whisper",
             "faster_whisper_model": "base",
             "proxy": True,
             "enable_batch": True,
