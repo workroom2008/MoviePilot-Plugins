@@ -1188,7 +1188,7 @@ class AutoSubv2(_PluginBase):
                                                                 'props': {
                                                                     'type': 'info',
                                                                     'variant': 'tonal',
-                                                                    'text': '翻译依赖 OpenAi 插件配置'
+                                                                    'text': '翻译依赖 ChatGPT 插件配置'
                                                                 }
                                                             }
                                                         ]
