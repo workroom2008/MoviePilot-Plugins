@@ -75,6 +75,7 @@ class AutoSubv2(_PluginBase):
     _batch_size = None
     _context_window = None
     _max_retries = None
+    _enable_merge = None
     _enable_asr = None
     _huggingface_proxy = None
     _faster_whisper_model_path = None
@@ -119,6 +120,7 @@ class AutoSubv2(_PluginBase):
             self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 20
             self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
             self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
+            self._enable_merge = config.get('enable_merge', True)
 
         self.stop_service()
 
@@ -745,7 +747,7 @@ class AutoSubv2(_PluginBase):
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        if source_lang in ["en", "eng"]:
+        if source_lang in ["en", "eng"] and self._enable_merge:
             valid_subs = self.__merge_srt(subs)
             logger.info(f"英文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
         else:
@@ -1125,22 +1127,8 @@ class AutoSubv2(_PluginBase):
                                                             {
                                                                 'component': 'VSwitch',
                                                                 'props': {
-                                                                    'model': 'enable_batch',
-                                                                    'label': '启用批量翻译'
-                                                                }
-                                                            }
-                                                        ]
-                                                    },
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 3, 'v-show': 'enable_batch'},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VTextField',
-                                                                'props': {
-                                                                    'model': 'batch_size',
-                                                                    'label': '每批翻译行数',
-                                                                    'placeholder': '20'
+                                                                    'model': 'enable_merge',
+                                                                    'label': '翻译英文时合并整句'
                                                                 }
                                                             }
                                                         ]
@@ -1169,6 +1157,38 @@ class AutoSubv2(_PluginBase):
                                                                     'model': 'max_retries',
                                                                     'label': 'llm请求重试次数',
                                                                     'placeholder': '3'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 3},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'enable_batch',
+                                                                    'label': '启用批量翻译'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 3, 'v-show': 'enable_batch'},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'batch_size',
+                                                                    'label': '每批翻译行数',
+                                                                    'placeholder': '20'
                                                                 }
                                                             }
                                                         ]
@@ -1256,7 +1276,8 @@ class AutoSubv2(_PluginBase):
             "enable_batch": True,
             "batch_size": 20,
             "context_window": 5,
-            "max_retries": 3
+            "max_retries": 3,
+            "enable_merge": False,
         }
 
     def get_api(self) -> List[Dict[str, Any]]:
