@@ -35,6 +35,7 @@ class UserInterruptException(Exception):
     """用户中断当前任务的异常"""
     pass
 
+
 class AutoSubv2(_PluginBase):
     # 插件名称
     plugin_name = "AI字幕自动生成(v2)"
@@ -59,7 +60,7 @@ class AutoSubv2(_PluginBase):
 
     # 私有属性
     _running = False
-    _event = Event() # 退出事件
+    _event = Event()  # 退出事件
     _scheduler = None
     _enabled = None
     _listen_transfer_event = None
@@ -96,7 +97,7 @@ class AutoSubv2(_PluginBase):
         if self._enable_asr:
             self._faster_whisper_model = config.get('faster_whisper_model', 'base')
             self._faster_whisper_model_path = config.get('faster_whisper_model_path',
-                                                        self.get_data_path() / "faster-whisper-models")
+                                                         self.get_data_path() / "faster-whisper-models")
             self._huggingface_proxy = config.get('proxy', False)
         self._translate_zh = config.get('translate_zh', False)
         if self._translate_zh:
@@ -212,7 +213,6 @@ class AutoSubv2(_PluginBase):
             logger.warn(f"faster-whisper 未安装，不进行处理")
             return False
         return True
-       
 
     def __process_file_subtitle(self, video_file):
         if not video_file:
@@ -304,11 +304,11 @@ class AutoSubv2(_PluginBase):
                 download_model(self._faster_whisper_model, local_files_only=False, cache_dir=cache_dir),
                 device="cpu", compute_type="int8", cpu_threads=psutil.cpu_count(logical=False))
             segments, info = model.transcribe(audio_file,
-                                                language=lang if lang != 'auto' else None,
-                                                word_timestamps=True,
-                                                vad_filter=True,
-                                                temperature=0,
-                                                beam_size=5)
+                                              language=lang if lang != 'auto' else None,
+                                              word_timestamps=True,
+                                              vad_filter=True,
+                                              temperature=0,
+                                              beam_size=5)
             logger.info("Detected language '%s' with probability %f" % (info.language, info.language_probability))
 
             if lang == 'auto':
@@ -325,9 +325,9 @@ class AutoSubv2(_PluginBase):
                     for word in segment.words:
                         idx += 1
                         subs.append(srt.Subtitle(index=idx,
-                                                    start=timedelta(seconds=word.start),
-                                                    end=timedelta(seconds=word.end),
-                                                    content=word.word))
+                                                 start=timedelta(seconds=word.start),
+                                                 end=timedelta(seconds=word.end),
+                                                 content=word.word))
                 subs = self.__merge_srt(subs)
             else:
                 for i, segment in enumerate(segments):
@@ -335,9 +335,9 @@ class AutoSubv2(_PluginBase):
                         logger.info(f"whisper音轨转录服务停止")
                         raise UserInterruptException(f"用户中断当前任务")
                     subs.append(srt.Subtitle(index=i,
-                                                start=timedelta(seconds=segment.start),
-                                                end=timedelta(seconds=segment.end),
-                                                content=segment.text))
+                                             start=timedelta(seconds=segment.start),
+                                             end=timedelta(seconds=segment.end),
+                                             content=segment.text))
             self.__save_srt(f"{audio_file}.srt", subs)
             logger.info(f"音轨转字幕完成")
             return True, lang
@@ -684,7 +684,8 @@ class AutoSubv2(_PluginBase):
     def __get_context(self, all_subs: list, target_indices: List[int], is_batch: bool) -> str:
         """通用上下文获取方法"""
         min_idx = max(0, min(target_indices) - self._context_window)
-        max_idx = min(len(all_subs) - 1, max(target_indices) + self._context_window) if is_batch else min(target_indices)
+        max_idx = min(len(all_subs) - 1, max(target_indices) + self._context_window) if is_batch else min(
+            target_indices)
 
         context = []
         for idx in range(min_idx, max_idx + 1):
@@ -744,7 +745,7 @@ class AutoSubv2(_PluginBase):
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        if source_lang in ["en", "eng"]:    
+        if source_lang in ["en", "eng"]:
             valid_subs = self.__merge_srt(subs)
             logger.info(f"英文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
         else:
