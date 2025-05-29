@@ -113,9 +113,9 @@ class AutoSubv2(_PluginBase):
             if not openai_key:
                 logger.error(f"翻译依赖于ChatGPT，请先维护openai_key")
                 return
-            self.openai = OpenAi(api_key=openai_key, api_url=openai_url,
-                                 proxy=settings.PROXY if openai_proxy else None,
-                                 model=openai_model)
+            self._openai = OpenAi(api_key=openai_key, api_url=openai_url,
+                                  proxy=settings.PROXY if openai_proxy else None,
+                                  model=openai_model)
             self._enable_batch = config.get('enable_batch', True)
             self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 20
             self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
@@ -710,7 +710,7 @@ class AutoSubv2(_PluginBase):
         batch_text = '\n'.join([item.content for item in batch])
 
         try:
-            ret, result = self.openai.translate_to_zh(batch_text, context)
+            ret, result = self._openai.translate_to_zh(batch_text, context)
             if not ret:
                 raise Exception(result)
 
@@ -732,7 +732,7 @@ class AutoSubv2(_PluginBase):
         for _ in range(self._max_retries):
             idx = all_subs.index(item)
             context = self.__get_context(all_subs, [idx], is_batch=False) if self._context_window > 0 else None
-            success, trans = self.openai.translate_to_zh(item.content, context)
+            success, trans = self._openai.translate_to_zh(item.content, context)
 
             if success:
                 item.content = f"{trans}\n{item.content}"
