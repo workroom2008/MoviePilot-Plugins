@@ -110,8 +110,8 @@ class AutoSubv2(_PluginBase):
         self._run_now = config.get('run_now')
         if self._run_now:
             self._path_list = list(set(config.get('path_list').split('\n')))
-            self._file_size = int(config.get('file_size')) if config.get('file_size') else 10
         self._send_notify = config.get('send_notify', False)
+        self._file_size = int(config.get('file_size')) if config.get('file_size') else 10
         # 字幕生成设置
         self._translate_preference = config.get('translate_preference', 'origin_first')
         self._enable_asr = config.get('enable_asr', True)
@@ -254,7 +254,7 @@ class AutoSubv2(_PluginBase):
         if not video_file:
             return TaskStatus.FAILED
         # 如果文件大小小于指定大小， 则不处理
-        if os.path.getsize(video_file) < self._file_size:
+        if os.path.getsize(video_file) < self._file_size * 1024 * 1024:
             return TaskStatus.IGNORED
 
         start_time = time.time()
