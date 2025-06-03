@@ -65,7 +65,7 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "1.2"
+    plugin_version = "2.0"
     # 插件作者
     plugin_author = "TimoYoung"
     # 作者主页
@@ -80,6 +80,7 @@ class AutoSubv2(_PluginBase):
     # 私有属性
     _task_queue = None
     _consumer_thread = None
+    _current_processing_task = None
     _running = False
     _event = Event()
     _enabled = None
@@ -163,22 +164,35 @@ class AutoSubv2(_PluginBase):
         else:
             self.stop_service()
 
+    def __is_duplicate_task(self, video_file: str) -> bool:
+        with self._task_queue.mutex:
+            for task in self._task_queue.queue:
+                if task.video_file == video_file:
+                    return True
+            # 还要检查当前正在处理的任务（即可能不在队列中，但正在被消费）
+            if self._consumer_thread and self._current_processing_task and self._current_processing_task.video_file == video_file:
+                return True
+        return False
+
     def _consume_tasks(self):
         while not self._event.is_set():
             try:
                 task = self._task_queue.get(timeout=1)
                 if task is None:
                     continue
+                self._current_processing_task = task
                 logger.info(f"开始处理任务 {task.task_id}: {task.video_file}")
                 task.status = TaskStatus.IN_PROGRESS
                 task.status = self.__process_autosub(task.video_file)
                 task.complete_time = datetime.now()
                 self._task_queue.task_done()
+                self._current_processing_task = None
             except queue.Empty:
                 continue
             except Exception as e:
                 logger.error(f"消费任务时发生异常: {e}")
                 logger.error(traceback.format_exc())
+                self._current_processing_task = None
         logger.info("消费线程已退出")
 
     # 监听媒体入库事件，每个事件触发一次自动字幕任务
@@ -207,6 +221,9 @@ class AutoSubv2(_PluginBase):
                     source=TaskSource.EVENT,
                     add_time=datetime.now()
                 )
+                if self.__is_duplicate_task(task.video_file):
+                    logger.info(f"任务已存在，跳过添加：{file_path}")
+                    continue
                 self._task_queue.put(task)
                 logger.info(f"加入任务队列: {file_path} ")
 
@@ -224,6 +241,9 @@ class AutoSubv2(_PluginBase):
                         source=TaskSource.MANUAL,
                         add_time=datetime.now()
                     )
+                    if self.__is_duplicate_task(task.video_file):
+                        logger.info(f"任务已存在，跳过添加：{video_file}")
+                        continue
                     self._task_queue.put(task)
                     logger.info(f"加入任务队列: {video_file} ")
             elif os.path.splitext(path)[-1].lower() in settings.RMT_MEDIAEXT:
@@ -233,6 +253,10 @@ class AutoSubv2(_PluginBase):
                     source=TaskSource.MANUAL,
                     add_time=datetime.now()
                 )
+                if self.__is_duplicate_task(task.video_file):
+                    logger.info(f"任务已存在，跳过添加：{path}")
+                    continue
+                self._task_queue.put(task)
                 self._task_queue.put(task)
                 logger.info(f"加入任务队列: {path} ")
 
