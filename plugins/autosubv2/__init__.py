@@ -1,7 +1,5 @@
 import copy
 import os
-import re
-import subprocess
 import tempfile
 import time
 import traceback
@@ -11,29 +9,50 @@ from typing import Tuple, Dict, Any, List
 from threading import Event
 import iso639
 import psutil
-import pytz
 import srt
-from apscheduler.schedulers.background import BackgroundScheduler
 from lxml import etree
-
+from dataclasses import dataclass
+from enum import Enum
+import queue, threading
+from uuid import uuid4
 from app.core.config import settings
 from app.core.context import MediaInfo
 from app.core.event import eventmanager, Event as MPEvent
-from app.schemas import TransferInfo, FileItem
-from app.schemas.types import NotificationType, EventType, MediaType
+from app.schemas import TransferInfo
+from app.schemas.types import NotificationType, EventType
 from app.log import logger
 from app.plugins import _PluginBase
 from app.utils.system import SystemUtils
 from plugins.autosubv2.ffmpeg import Ffmpeg
-from plugins.autosubv2.translate.openai import OpenAi
+from plugins.autosubv2.translate.openai_translate import OpenAi
 
-
-# todo
-# 监听入库事件，自动调用翻译
 
 class UserInterruptException(Exception):
     """用户中断当前任务的异常"""
     pass
+
+
+class TaskSource(Enum):
+    MANUAL = "manual"
+    EVENT = "event"
+
+
+class TaskStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    IGNORED = "ignored"
+    FAILED = "failed"
+
+
+@dataclass
+class TaskItem:
+    task_id: str
+    video_file: str
+    source: TaskSource
+    add_time: datetime
+    status: TaskStatus = TaskStatus.PENDING
+    complete_time: datetime = None
 
 
 class AutoSubv2(_PluginBase):
@@ -59,9 +78,10 @@ class AutoSubv2(_PluginBase):
     auth_level = 2
 
     # 私有属性
+    _task_queue = None
+    _consumer_thread = None
     _running = False
-    _event = Event()  # 退出事件
-    _scheduler = None
+    _event = Event()
     _enabled = None
     _listen_transfer_event = None
     _send_notify = None
@@ -122,85 +142,99 @@ class AutoSubv2(_PluginBase):
             self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
             self._enable_merge = config.get('enable_merge', True)
 
-        self.stop_service()
+        if self._enabled:
+            logger.info("AI生成字幕服务已启动")
+            # asr 配置检查
+            if self._enable_asr and not self.__check_asr():
+                return
 
-        if not self._enabled:
-            return
+            if not self._running:
+                self._task_queue = queue.Queue()
+                self._consumer_thread = threading.Thread(target=self._consume_tasks, daemon=True)
+                self._consumer_thread.start()
+                logger.info("任务队列和消费者线程已启动")
+                self._running = True
 
-        # asr 配置检查
-        if self._enable_asr and not self.__check_asr():
-            return
+            if self._run_now:
+                config['run_now'] = False
+                self.update_config(config)
+                logger.info("立即运行一次")
+                self._run_at_once(path_list=self._path_list)
+        else:
+            self.stop_service()
 
-        if self._running:
-            logger.warn(f"上一次任务还未完成，不进行处理")
-            return
-
-        if self._run_now:
-            config['run_now'] = False
-            self.update_config(config)
-
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            logger.info("AI字幕自动生成任务，立即运行一次")
-            self._scheduler.add_job(func=self._do_autosub, kwargs={'path_list': self._path_list}, trigger='date',
-                                    run_date=datetime.now(tz=pytz.timezone(settings.TZ)) + timedelta(seconds=3),
-                                    name="AI字幕自动生成")
-
-            # 启动任务
-            if self._scheduler.get_jobs():
-                self._scheduler.print_jobs()
-                self._scheduler.start()
+    def _consume_tasks(self):
+        while not self._event.is_set():
+            try:
+                task = self._task_queue.get(timeout=1)
+                if task is None:
+                    continue
+                logger.info(f"开始处理任务 {task.task_id}: {task.video_file}")
+                task.status = TaskStatus.IN_PROGRESS
+                task.status = self.__process_autosub(task.video_file)
+                task.complete_time = datetime.now()
+                self._task_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"消费任务时发生异常: {e}")
+                logger.error(traceback.format_exc())
+        logger.info("消费线程已退出")
 
     # 监听媒体入库事件，每个事件触发一次自动字幕任务
     @eventmanager.register(EventType.TransferComplete)
     def on_transfer_complete(self, event: MPEvent):
         """监听媒体入库事件"""
+        if not self._listen_transfer_event:
+            return
         item = event.event_data
         item_media: MediaInfo = item.get("mediainfo")
+        logger.info(f"监听到媒体入库事件：{item_media.title}")
         origin_lang = item_media.original_language
-        logger.info(f"origin_lang: {origin_lang}")
         prefer_langs = ['zh', 'chi', 'zh-CN', 'chs', 'zhs', 'zh-Hans', 'zhong', 'simp', 'cn']
         if origin_lang in prefer_langs:
-            logger.info(f"媒体原始语言为中文，跳过自动字幕")
+            logger.info(f"媒体原始语言为中文，跳过处理")
+            return
+
         item_transfer: TransferInfo = item.get("transferinfo")
         item_file_list = item_transfer.file_list_new
-        logger.info(f"item_file_list: {item_file_list}")
 
-    def _do_autosub(self, path_list: str):
+        for file_path in item_file_list:
+            if os.path.splitext(file_path)[-1].lower() in settings.RMT_MEDIAEXT:
+                task = TaskItem(
+                    task_id=str(uuid4()),
+                    video_file=file_path,
+                    source=TaskSource.EVENT,
+                    add_time=datetime.now()
+                )
+                self._task_queue.put(task)
+                logger.info(f"加入任务队列: {file_path} ")
+
+    def _run_at_once(self, path_list: List[str]):
         # 依次处理每个目录
-        try:
-            self._running = True
-            for path in path_list:
-                if self._event.is_set():
-                    logger.info(f"字幕生成服务停止")
-                    return
-                logger.info(f"开始处理目录/文件：{path} ...")
-                # 如果目录不存在， 则不处理
-                if not os.path.exists(path):
-                    logger.warn(f"目录/文件不存在，不进行处理")
-                    continue
-
-                # 如果目录不是绝对路径， 则不处理
-                if not os.path.isabs(path):
-                    logger.warn(f"目录/文件不是绝对路径，不进行处理")
-                    continue
-
-                if os.path.isdir(path):
-                    # 处理目录
-                    self.__process_folder_subtitle(path)
-                elif os.path.splitext(path)[-1].lower() in settings.RMT_MEDIAEXT:
-                    # 处理单个视频文件
-                    self.__process_file_subtitle(path)
-                # 如果目录不是文件夹， 则不处理
-                else:
-                    logger.warn(f"目录不是文件夹或视频文件，不进行处理")
-                    continue
-
-        except Exception as e:
-            logger.error(f"处理异常: {e}")
-            logger.error(traceback.format_exc())
-        finally:
-            logger.info(f"处理完成")
-            self._running = False
+        for path in path_list:
+            if not os.path.exists(path) or not os.path.isabs(path):
+                logger.warn(f"目录/文件无效，不进行处理:{path}")
+                continue
+            if os.path.isdir(path):
+                for video_file in self.__get_library_files(path):
+                    task = TaskItem(
+                        task_id=str(uuid4()),
+                        video_file=video_file,
+                        source=TaskSource.MANUAL,
+                        add_time=datetime.now()
+                    )
+                    self._task_queue.put(task)
+                    logger.info(f"加入任务队列: {video_file} ")
+            elif os.path.splitext(path)[-1].lower() in settings.RMT_MEDIAEXT:
+                task = TaskItem(
+                    task_id=str(uuid4()),
+                    video_file=path,
+                    source=TaskSource.MANUAL,
+                    add_time=datetime.now()
+                )
+                self._task_queue.put(task)
+                logger.info(f"加入任务队列: {path} ")
 
     def __check_asr(self):
         if not self._faster_whisper_model_path or not self._faster_whisper_model:
@@ -216,12 +250,12 @@ class AutoSubv2(_PluginBase):
             return False
         return True
 
-    def __process_file_subtitle(self, video_file):
+    def __process_autosub(self, video_file) -> TaskStatus:
         if not video_file:
-            return
+            return TaskStatus.FAILED
         # 如果文件大小小于指定大小， 则不处理
         if os.path.getsize(video_file) < self._file_size:
-            return
+            return TaskStatus.IGNORED
 
         start_time = time.time()
         file_path, file_ext = os.path.splitext(video_file)
@@ -232,23 +266,18 @@ class AutoSubv2(_PluginBase):
             # 判断目的字幕（和内嵌）是否已存在
             if self.__target_subtitle_exists(video_file):
                 logger.warn(f"字幕文件已经存在，不进行处理")
-                return
+                return TaskStatus.IGNORED
             # 生成字幕
             ret, lang, gen_sub_path = self.__generate_subtitle(video_file, file_path, self._enable_asr)
             if not ret:
-                message = f" 媒体: {file_name}\n "
-                if not self._enable_asr:
-                    message += "内嵌&外挂字幕不存在，不进行翻译"
-                else:
-                    message += "生成字幕失败，跳过后续处理"
+                message = f" 媒体: {file_name}\n 生成字幕失败，跳过后续处理"
                 if self._send_notify:
                     self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
-                return
+                return TaskStatus.FAILED
 
             if self._translate_zh:
                 # 翻译字幕
                 logger.info(f"开始翻译字幕为中文 ...")
-                # self.__translate_zh_subtitle(lang, f"{file_path}.{lang}.srt", f"{file_path}.zh.机翻.srt")
                 self.__translate_zh_subtitle(lang, gen_sub_path, f"{file_path}.zh.机翻.srt")
                 logger.info(f"翻译字幕完成：{file_name}.zh.机翻.srt")
 
@@ -260,8 +289,10 @@ class AutoSubv2(_PluginBase):
             logger.info(f"自动字幕生成 处理完成：{message}")
             if self._send_notify:
                 self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
+            return TaskStatus.COMPLETED
         except UserInterruptException:
             logger.info(f"用户中断当前任务：{video_file}")
+            return TaskStatus.FAILED
         except Exception as e:
             logger.error(f"自动字幕生成 处理异常：{e}")
             end_time = time.time()
@@ -270,19 +301,7 @@ class AutoSubv2(_PluginBase):
                 self.post_message(mtype=NotificationType.Plugin, title="【自动字幕生成】", text=message)
             # 打印调用栈
             logger.error(traceback.format_exc())
-
-    def __process_folder_subtitle(self, path):
-        """
-        处理目录字幕
-        :param path:
-        :return:
-        """
-        # 获取目录媒体文件列表
-        for video_file in self.__get_library_files(path):
-            if self._event.is_set():
-                logger.info(f"{video_file}处理中止")
-                return
-            self.__process_file_subtitle(video_file)
+            return TaskStatus.FAILED
 
     def __do_speech_recognition(self, audio_lang, audio_file):
         """
@@ -703,6 +722,11 @@ class AutoSubv2(_PluginBase):
             return self.__process_batch(all_subs, items)
         return [self.__process_single(all_subs, item) for item in items]
 
+    def __translate_to_zh(self, text: str, context: str = None) -> str:
+        if self._event.is_set():
+            raise UserInterruptException(f"用户中断当前任务")
+        return self._openai.translate_to_zh(text, context)
+
     def __process_batch(self, all_subs: list, batch: list) -> list:
         """批量处理逻辑"""
         indices = [all_subs.index(item) for item in batch]
@@ -710,7 +734,7 @@ class AutoSubv2(_PluginBase):
         batch_text = '\n'.join([item.content for item in batch])
 
         try:
-            ret, result = self._openai.translate_to_zh(batch_text, context)
+            ret, result = self.__translate_to_zh(batch_text, context)
             if not ret:
                 raise Exception(result)
 
@@ -732,7 +756,7 @@ class AutoSubv2(_PluginBase):
         for _ in range(self._max_retries):
             idx = all_subs.index(item)
             context = self.__get_context(all_subs, [idx], is_batch=False) if self._context_window > 0 else None
-            success, trans = self._openai.translate_to_zh(item.content, context)
+            success, trans = self.__translate_to_zh(item.content, context)
 
             if success:
                 item.content = f"{trans}\n{item.content}"
@@ -757,9 +781,6 @@ class AutoSubv2(_PluginBase):
         current_batch = []
 
         for item in valid_subs:
-            if self._event.is_set():
-                logger.info(f"字幕{source_subtitle}翻译停止")
-                raise UserInterruptException(f"用户中断当前任务")
             current_batch.append(item)
 
             if len(current_batch) >= self._batch_size:
@@ -971,7 +992,7 @@ class AutoSubv2(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 8},
+                                'props': {'cols': 12, 'md': 12},
                                 'content': [
                                     {
                                         'component': 'VTextarea',
@@ -983,7 +1004,12 @@ class AutoSubv2(_PluginBase):
                                         }
                                     }
                                 ]
-                            },
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
                             {
                                 'component': 'VCol',
                                 'props': {'cols': 12, 'md': 4},
@@ -992,8 +1018,91 @@ class AutoSubv2(_PluginBase):
                                         'component': 'VTextField',
                                         'props': {
                                             'model': 'file_size',
-                                            'label': '最小文件大小(MB)',
+                                            'label': '触发字幕生成的视频文件不小于(MB)',
                                             'placeholder': '默认0'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4},
+                                'content': [
+                                    {
+                                        'component': 'VSelect',
+                                        'props': {
+                                            'model': 'translate_preference',
+                                            'label': '字幕源语言偏好',
+                                            'hint': '小语种视频存在多语言字幕/音轨时，优先选择哪种语言用于翻译',
+                                            'items': [
+                                                {'title': '仅英文', 'value': 'english_only'},
+                                                {'title': '英文优先', 'value': 'english_first'},
+                                                {'title': '原音优先', 'value': 'origin_first'}
+                                            ]
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'translate_zh',
+                                            'label': '翻译成中文',
+                                            'hint': '需要配置ChatGPT插件'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'enable_asr',
+                                            'label': '允许从音轨生成字幕'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4, 'v-show': 'enable_asr'},
+                                'content': [
+                                    {
+                                        'component': 'VSelect',
+                                        'props': {
+                                            'model': 'faster_whisper_model',
+                                            'label': 'faster-whisper模型选择',
+                                            'items': ['tiny', 'base', 'small', 'medium',
+                                                      'large-v3',
+                                                      {'title': 'large-v3-turbo',
+                                                       'value': 'deepdml/faster-whisper-large-v3-turbo-ct2'},
+                                                      ]
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4, 'v-show': 'enable_asr'},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'proxy',
+                                            'hint': '需配置MP环境变量PROXY_HOST',
+                                            'label': '使用代理下载模型'
                                         }
                                     }
                                 ]
@@ -1004,108 +1113,6 @@ class AutoSubv2(_PluginBase):
                         'component': 'VExpansionPanels',
                         'props': {'variant': 'accordion', 'multiple': True},
                         'content': [
-                            {
-                                'component': 'VExpansionPanel',
-                                'content': [
-                                    {
-                                        'component': 'VExpansionPanelTitle',
-                                        'text': '字幕生成设置'
-                                    },
-                                    {
-                                        'component': 'VExpansionPanelText',
-                                        'content': [
-                                            {
-                                                'component': 'VRow',
-                                                'content': [
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 4},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VSelect',
-                                                                'props': {
-                                                                    'model': 'translate_preference',
-                                                                    'label': '字幕源语言偏好',
-                                                                    'hint': '小语种视频存在多语言字幕/音轨时，优先选择哪种语言用于翻译',
-                                                                    'items': [
-                                                                        {'title': '仅英文', 'value': 'english_only'},
-                                                                        {'title': '英文优先', 'value': 'english_first'},
-                                                                        {'title': '原音优先', 'value': 'origin_first'}
-                                                                    ]
-                                                                }
-                                                            }
-                                                        ]
-                                                    },
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 4},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VSwitch',
-                                                                'props': {
-                                                                    'model': 'enable_asr',
-                                                                    'label': '允许从音轨生成字幕'
-                                                                }
-                                                            }
-                                                        ]
-                                                    },
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 4},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VSwitch',
-                                                                'props': {
-                                                                    'model': 'translate_zh',
-                                                                    'label': '翻译成中文',
-                                                                    'hint': '需要配置OpenAI插件'
-                                                                }
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'VRow',
-                                                'content': [
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 4, 'v-show': 'enable_asr'},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VSelect',
-                                                                'props': {
-                                                                    'model': 'faster_whisper_model',
-                                                                    'label': 'faster-whisper模型选择',
-                                                                    'items': ['tiny', 'base', 'small', 'medium',
-                                                                              'large-v3',
-                                                                              {'title': 'large-v3-turbo',
-                                                                               'value': 'deepdml/faster-whisper-large-v3-turbo-ct2'},
-                                                                              ]
-                                                                }
-                                                            }
-                                                        ]
-                                                    },
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 4, 'v-show': 'enable_asr'},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VSwitch',
-                                                                'props': {
-                                                                    'model': 'proxy',
-                                                                    'hint': '需配置MP环境变量PROXY_HOST',
-                                                                    'label': '使用代理下载模型'
-                                                                }
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
                             {
                                 'component': 'VExpansionPanel',
                                 'props': {'v-show': 'translate_zh'},
@@ -1122,20 +1129,7 @@ class AutoSubv2(_PluginBase):
                                                 'content': [
                                                     {
                                                         'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 3},
-                                                        'content': [
-                                                            {
-                                                                'component': 'VSwitch',
-                                                                'props': {
-                                                                    'model': 'enable_merge',
-                                                                    'label': '翻译英文时合并整句'
-                                                                }
-                                                            }
-                                                        ]
-                                                    },
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 3},
+                                                        'props': {'cols': 12, 'md': 4},
                                                         'content': [
                                                             {
                                                                 'component': 'VTextField',
@@ -1149,7 +1143,7 @@ class AutoSubv2(_PluginBase):
                                                     },
                                                     {
                                                         'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 3},
+                                                        'props': {'cols': 12, 'md': 4},
                                                         'content': [
                                                             {
                                                                 'component': 'VTextField',
@@ -1157,6 +1151,19 @@ class AutoSubv2(_PluginBase):
                                                                     'model': 'max_retries',
                                                                     'label': 'llm请求重试次数',
                                                                     'placeholder': '3'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'enable_merge',
+                                                                    'label': '翻译英文时合并整句'
                                                                 }
                                                             }
                                                         ]
@@ -1168,7 +1175,7 @@ class AutoSubv2(_PluginBase):
                                                 'content': [
                                                     {
                                                         'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 3},
+                                                        'props': {'cols': 12, 'md': 4},
                                                         'content': [
                                                             {
                                                                 'component': 'VSwitch',
@@ -1181,7 +1188,7 @@ class AutoSubv2(_PluginBase):
                                                     },
                                                     {
                                                         'component': 'VCol',
-                                                        'props': {'cols': 12, 'md': 3, 'v-show': 'enable_batch'},
+                                                        'props': {'cols': 12, 'md': 4, 'v-show': 'enable_batch'},
                                                         'content': [
                                                             {
                                                                 'component': 'VTextField',
@@ -1302,7 +1309,16 @@ class AutoSubv2(_PluginBase):
         """
         if self._running:
             self._event.set()
-            self._running = False
-            self._scheduler.shutdown()
-            self._event.clear()
-            logger.info(f"停止自动字幕生成服务")
+        if self._consumer_thread and self._consumer_thread.is_alive():
+            logger.info("正在停止当前任务...")
+            # self._consumer_thread.join(timeout=3)
+            self._consumer_thread.join()
+
+        if self._task_queue:
+            while not self._task_queue.empty():
+                self._task_queue.get_nowait()
+                self._task_queue.task_done()
+            logger.info("任务队列已清空")
+        self._running = False
+        self._event.clear()
+        logger.info(f"自动字幕生成服务已停止")
