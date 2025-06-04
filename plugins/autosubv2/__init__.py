@@ -1370,8 +1370,8 @@ class AutoSubv2(_PluginBase):
         rows = []
         for task_id, task in sorted_tasks:
             source_label = {
-                TaskSource.MANUAL: "手动",
-                TaskSource.EVENT: "事件触发"
+                TaskSource.MANUAL: "手动添加",
+                TaskSource.EVENT: "入库触发"
             }.get(task.source, task.source)
 
             status_text = {
@@ -1394,9 +1394,9 @@ class AutoSubv2(_PluginBase):
                 "component": "tr",
                 "props": {"class": "text-sm"},
                 "content": [
+                    {"component": "td", "text": add_time_str},
                     {"component": "td", "text": task.video_file},
                     {"component": "td", "text": source_label},
-                    {"component": "td", "text": add_time_str},
                     {"component": "td", "text": complete_time_str},
                     {
                         "component": "td",
@@ -1424,17 +1424,17 @@ class AutoSubv2(_PluginBase):
                                             {
                                                 "component": "th",
                                                 "props": {"class": "text-start ps-4"},
+                                                "text": "添加时间"
+                                            },
+                                            {
+                                                "component": "th",
+                                                "props": {"class": "text-start ps-4"},
                                                 "text": "视频文件"
                                             },
                                             {
                                                 "component": "th",
                                                 "props": {"class": "text-start ps-4"},
                                                 "text": "来源"
-                                            },
-                                            {
-                                                "component": "th",
-                                                "props": {"class": "text-start ps-4"},
-                                                "text": "添加时间"
                                             },
                                             {
                                                 "component": "th",
@@ -1483,6 +1483,12 @@ class AutoSubv2(_PluginBase):
                 self._task_queue.get_nowait()
                 self._task_queue.task_done()
             logger.info("任务队列已清空")
+        for task_id in list(self._tasks.keys()):
+            task = self._tasks[task_id]
+            if task.status == TaskStatus.PENDING or task.status == TaskStatus.IN_PROGRESS:
+                task.status = TaskStatus.FAILED
+                task.complete_time = datetime.now()
+        self.save_tasks()  # 持久化更新后的任务列表
         self._running = False
         self._event.clear()
         logger.info(f"自动字幕生成服务已停止")
