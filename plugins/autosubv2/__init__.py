@@ -78,6 +78,7 @@ class AutoSubv2(_PluginBase):
     auth_level = 2
 
     # 私有属性
+    _tasks: Dict[str, TaskItem] = None
     _task_queue = None
     _consumer_thread = None
     _current_processing_task = None
@@ -106,6 +107,7 @@ class AutoSubv2(_PluginBase):
         # 如果没有配置信息， 则不处理
         if not config:
             return
+        self._tasks = self.load_tasks()
         self._enabled = config.get('enabled', False)
         self._listen_transfer_event = config.get('listen_transfer_event', True)
         self._run_now = config.get('run_now')
@@ -164,6 +166,63 @@ class AutoSubv2(_PluginBase):
         else:
             self.stop_service()
 
+    def load_tasks(self) -> Dict[str, TaskItem]:
+        raw_tasks = self.get_data("tasks") or {}
+        tasks = {}
+        for task_id, task_dict in raw_tasks.items():
+            try:
+                task = TaskItem(
+                    task_id=task_dict["task_id"],
+                    video_file=task_dict["video_file"],
+                    source=TaskSource(task_dict["source"]),
+                    add_time=datetime.fromisoformat(task_dict["add_time"]),
+                    status=TaskStatus(task_dict["status"]),
+                    complete_time=datetime.fromisoformat(task_dict["complete_time"])
+                    if task_dict.get("complete_time") else None,
+                )
+                tasks[task_id] = task
+            except Exception as e:
+                logger.error(f"恢复任务失败：{e}")
+        return tasks
+
+    @staticmethod
+    def _serialize_task(task: TaskItem) -> dict:
+        return {
+            "task_id": task.task_id,
+            "video_file": task.video_file,
+            "source": task.source.value,
+            "add_time": task.add_time.isoformat() if task.add_time else None,
+            "status": task.status.value,
+            "complete_time": task.complete_time.isoformat() if task.complete_time else None,
+        }
+
+    def save_tasks(self):
+        tasks_dict = {task_id: self._serialize_task(task) for task_id, task in self._tasks.items()}
+        self.save_data("tasks", tasks_dict)
+
+    def add_task(self, video_file: str, source: TaskSource):
+        """
+        添加新任务到队列和任务列表中，若任务已存在则跳过。
+        :param video_file: 视频文件路径
+        :param source: 任务来源（手动/事件）
+        """
+        task = TaskItem(
+            task_id=str(uuid4()),
+            video_file=video_file,
+            source=source,
+            add_time=datetime.now()
+        )
+
+        if self.__is_duplicate_task(task.video_file):
+            logger.info(f"任务已存在，跳过添加：{video_file}")
+            return False
+
+        self._task_queue.put(task)
+        self._tasks[task.task_id] = task
+        self.save_tasks()
+        logger.info(f"加入任务队列: {video_file}")
+        return True
+
     def __is_duplicate_task(self, video_file: str) -> bool:
         with self._task_queue.mutex:
             for task in self._task_queue.queue:
@@ -183,8 +242,12 @@ class AutoSubv2(_PluginBase):
                 self._current_processing_task = task
                 logger.info(f"开始处理任务 {task.task_id}: {task.video_file}")
                 task.status = TaskStatus.IN_PROGRESS
+                self._tasks[task.task_id] = task
+                self.save_tasks()
                 task.status = self.__process_autosub(task.video_file)
                 task.complete_time = datetime.now()
+                self._tasks[task.task_id] = task
+                self.save_tasks()
                 self._task_queue.task_done()
                 self._current_processing_task = None
             except queue.Empty:
@@ -215,17 +278,7 @@ class AutoSubv2(_PluginBase):
 
         for file_path in item_file_list:
             if os.path.splitext(file_path)[-1].lower() in settings.RMT_MEDIAEXT:
-                task = TaskItem(
-                    task_id=str(uuid4()),
-                    video_file=file_path,
-                    source=TaskSource.EVENT,
-                    add_time=datetime.now()
-                )
-                if self.__is_duplicate_task(task.video_file):
-                    logger.info(f"任务已存在，跳过添加：{file_path}")
-                    continue
-                self._task_queue.put(task)
-                logger.info(f"加入任务队列: {file_path} ")
+                self.add_task(file_path, TaskSource.EVENT)
 
     def _run_at_once(self, path_list: List[str]):
         # 依次处理每个目录
@@ -235,30 +288,9 @@ class AutoSubv2(_PluginBase):
                 continue
             if os.path.isdir(path):
                 for video_file in self.__get_library_files(path):
-                    task = TaskItem(
-                        task_id=str(uuid4()),
-                        video_file=video_file,
-                        source=TaskSource.MANUAL,
-                        add_time=datetime.now()
-                    )
-                    if self.__is_duplicate_task(task.video_file):
-                        logger.info(f"任务已存在，跳过添加：{video_file}")
-                        continue
-                    self._task_queue.put(task)
-                    logger.info(f"加入任务队列: {video_file} ")
+                    self.add_task(video_file, TaskSource.MANUAL)
             elif os.path.splitext(path)[-1].lower() in settings.RMT_MEDIAEXT:
-                task = TaskItem(
-                    task_id=str(uuid4()),
-                    video_file=path,
-                    source=TaskSource.MANUAL,
-                    add_time=datetime.now()
-                )
-                if self.__is_duplicate_task(task.video_file):
-                    logger.info(f"任务已存在，跳过添加：{path}")
-                    continue
-                self._task_queue.put(task)
-                self._task_queue.put(task)
-                logger.info(f"加入任务队列: {path} ")
+                self.add_task(path, TaskSource.MANUAL)
 
     def __check_asr(self):
         if not self._faster_whisper_model_path or not self._faster_whisper_model:
@@ -601,7 +633,8 @@ class AutoSubv2(_PluginBase):
 
         return merged_subtitle
 
-    def __get_video_prefer_audio(self, video_meta, prefer_lang=None):
+    @staticmethod
+    def __get_video_prefer_audio(video_meta, prefer_lang=None):
         """
         获取视频的首选音轨，如果有多音轨， 优先指定语言音轨，否则获取默认音轨
         :param video_meta
@@ -636,7 +669,8 @@ class AutoSubv2(_PluginBase):
         logger.info(f"选中音轨信息：{audio_index}, {audio_lang}")
         return True, audio_index, audio_lang
 
-    def __get_video_prefer_subtitle(self, video_meta, prefer_lang=None, strict=False, srt=True):
+    @staticmethod
+    def __get_video_prefer_subtitle(video_meta, prefer_lang=None, strict=False, srt=True):
         """
         获取视频的首选字幕。优先级：1.字幕为偏好语言 2.默认字幕 3.第一个字幕
         :param video_meta: 视频元数据
@@ -717,7 +751,8 @@ class AutoSubv2(_PluginBase):
         logger.debug(f"命中内嵌字幕信息：{subtitle_index}, {subtitle_lang}, score:{subtitle_score}")
         return True, subtitle_index, subtitle_lang
 
-    def __is_noisy_subtitle(self, content):
+    @staticmethod
+    def __is_noisy_subtitle(content):
         """
         判断是否为背景音等字幕
         :param content:
@@ -1315,7 +1350,111 @@ class AutoSubv2(_PluginBase):
         pass
 
     def get_page(self) -> List[dict]:
-        pass
+        # 加载任务并按添加时间倒序排列
+        tasks: Dict[str, TaskItem] = self.load_tasks()
+        sorted_tasks = sorted(
+            tasks.items(),
+            key=lambda x: x[1].add_time,
+            reverse=True
+        )
+
+        status_classes = {
+            TaskStatus.PENDING: "text-info",
+            TaskStatus.IN_PROGRESS: "text-warning",
+            TaskStatus.COMPLETED: "text-success",
+            TaskStatus.IGNORED: "text-muted",
+            TaskStatus.FAILED: "text-error"
+        }
+
+        rows = []
+        for task_id, task in sorted_tasks:
+            source_label = {
+                TaskSource.MANUAL: "手动",
+                TaskSource.EVENT: "事件触发"
+            }.get(task.source, task.source)
+
+            status_text = {
+                TaskStatus.PENDING: "等待中",
+                TaskStatus.IN_PROGRESS: "处理中",
+                TaskStatus.COMPLETED: "已完成",
+                TaskStatus.IGNORED: "已忽略",
+                TaskStatus.FAILED: "失败"
+            }.get(task.status, task.status)
+
+            status_class = status_classes.get(task.status, "")
+
+            add_time_str = task.add_time.strftime("%Y-%m-%d %H:%M:%S")
+            complete_time_str = (
+                task.complete_time.strftime("%Y-%m-%d %H:%M:%S")
+                if task.complete_time else "-"
+            )
+
+            rows.append({
+                "component": "tr",
+                "props": {"class": "text-sm"},
+                "content": [
+                    {"component": "td", "text": task.video_file},
+                    {"component": "td", "text": source_label},
+                    {"component": "td", "text": add_time_str},
+                    {"component": "td", "text": complete_time_str},
+                    {
+                        "component": "td",
+                        "props": {"class": status_class},
+                        "text": status_text
+                    },
+                ],
+            })
+
+        return [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTable",
+                                "props": {"hover": True},
+                                "content": [
+                                    {
+                                        "component": "thead",
+                                        "content": [
+                                            {
+                                                "component": "th",
+                                                "props": {"class": "text-start ps-4"},
+                                                "text": "视频文件"
+                                            },
+                                            {
+                                                "component": "th",
+                                                "props": {"class": "text-start ps-4"},
+                                                "text": "来源"
+                                            },
+                                            {
+                                                "component": "th",
+                                                "props": {"class": "text-start ps-4"},
+                                                "text": "添加时间"
+                                            },
+                                            {
+                                                "component": "th",
+                                                "props": {"class": "text-start ps-4"},
+                                                "text": "完成时间"
+                                            },
+                                            {
+                                                "component": "th",
+                                                "props": {"class": "text-start ps-4"},
+                                                "text": "状态"
+                                            },
+                                        ]
+                                    },
+                                    {"component": "tbody", "content": rows}
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
 
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:
