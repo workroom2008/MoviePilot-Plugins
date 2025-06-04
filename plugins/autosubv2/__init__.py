@@ -86,6 +86,7 @@ class AutoSubv2(_PluginBase):
     _running = False
     _event = Event()
     _enabled = None
+    _clear_history = None
     _listen_transfer_event = None
     _send_notify = None
     _translate_preference = None
@@ -110,6 +111,7 @@ class AutoSubv2(_PluginBase):
             return
         self._tasks = self.load_tasks()
         self._enabled = config.get('enabled', False)
+        self._clear_history = config.get('clear_history', False)
         self._listen_transfer_event = config.get('listen_transfer_event', True)
         self._run_now = config.get('run_now')
         if self._run_now:
@@ -146,6 +148,10 @@ class AutoSubv2(_PluginBase):
             self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
             self._enable_merge = config.get('enable_merge', False)
 
+        if self._clear_history:
+            config['clear_history'] = False
+            self.update_config(config)
+            self.clear_tasks()
         if self._enabled:
             logger.info("AI生成字幕服务已启动")
             # asr 配置检查
@@ -223,6 +229,13 @@ class AutoSubv2(_PluginBase):
         self.save_tasks()
         logger.info(f"加入任务队列: {video_file}")
         return True
+
+    def clear_tasks(self):
+        self._tasks = {task_id: task for task_id, task in self._tasks.items() if task.status in [
+            TaskStatus.PENDING, TaskStatus.IN_PROGRESS
+        ]}
+        self.save_tasks()
+        logger.info("插件历史任务已清除")
 
     def __is_duplicate_task(self, video_file: str) -> bool:
         with self._task_queue.mutex:
@@ -991,7 +1004,7 @@ class AutoSubv2(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
+                                'props': {'cols': 12, 'md': 4},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
@@ -1005,7 +1018,38 @@ class AutoSubv2(_PluginBase):
                             },
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
+                                'props': {'cols': 12, 'md': 4},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'clear_history',
+                                            'label': '清理历史记录',
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4},
+                                'content': [
+                                    {
+                                        'component': 'VSwitch',
+                                        'props': {
+                                            'model': 'send_notify',
+                                            'label': '发送通知'
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
@@ -1019,7 +1063,7 @@ class AutoSubv2(_PluginBase):
                             },
                             {
                                 'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
+                                'props': {'cols': 12, 'md': 4},
                                 'content': [
                                     {
                                         'component': 'VSwitch',
@@ -1027,19 +1071,6 @@ class AutoSubv2(_PluginBase):
                                             'model': 'run_now',
                                             'label': '手动执行一次',
                                             'color': 'secondary'
-                                        }
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'send_notify',
-                                            'label': '发送通知'
                                         }
                                     }
                                 ]
@@ -1330,10 +1361,11 @@ class AutoSubv2(_PluginBase):
             }
         ], {
             "enabled": False,
+            "clear_history": False,
+            "send_notify": False,
             "listen_transfer_event": True,
             "run_now": False,
             "path_list": "",
-            "send_notify": False,
             "file_size": "10",
             "translate_preference": "english_first",
             "translate_zh": False,
