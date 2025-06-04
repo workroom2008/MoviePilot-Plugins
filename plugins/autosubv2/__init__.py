@@ -117,13 +117,13 @@ class AutoSubv2(_PluginBase):
         self._send_notify = config.get('send_notify', False)
         self._file_size = int(config.get('file_size')) if config.get('file_size') else 10
         # 字幕生成设置
-        self._translate_preference = config.get('translate_preference', 'origin_first')
+        self._translate_preference = config.get('translate_preference', 'english_first')
         self._enable_asr = config.get('enable_asr', True)
         if self._enable_asr:
             self._faster_whisper_model = config.get('faster_whisper_model', 'base')
             self._faster_whisper_model_path = config.get('faster_whisper_model_path',
                                                          self.get_data_path() / "faster-whisper-models")
-            self._huggingface_proxy = config.get('proxy', False)
+            self._huggingface_proxy = config.get('proxy', True)
         self._translate_zh = config.get('translate_zh', False)
         if self._translate_zh:
             chatgpt = self.get_config("ChatGPT")
@@ -141,10 +141,10 @@ class AutoSubv2(_PluginBase):
                                   proxy=settings.PROXY if openai_proxy else None,
                                   model=openai_model)
             self._enable_batch = config.get('enable_batch', True)
-            self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 20
+            self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 10
             self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
             self._max_retries = int(config.get('max_retries')) if config.get('max_retries') else 3
-            self._enable_merge = config.get('enable_merge', True)
+            self._enable_merge = config.get('enable_merge', False)
 
         if self._enabled:
             logger.info("AI生成字幕服务已启动")
@@ -1079,7 +1079,7 @@ class AutoSubv2(_PluginBase):
                                         'props': {
                                             'model': 'file_size',
                                             'label': '触发字幕生成的视频文件不小于(MB)',
-                                            'placeholder': '默认0'
+                                            'placeholder': '默认10'
                                         }
                                     }
                                 ]
@@ -1255,7 +1255,7 @@ class AutoSubv2(_PluginBase):
                                                                 'props': {
                                                                     'model': 'batch_size',
                                                                     'label': '每批翻译行数',
-                                                                    'placeholder': '20'
+                                                                    'placeholder': '10'
                                                                 }
                                                             }
                                                         ]
@@ -1333,18 +1333,18 @@ class AutoSubv2(_PluginBase):
             "listen_transfer_event": True,
             "run_now": False,
             "path_list": "",
-            "file_size": "10",
             "send_notify": False,
+            "file_size": "10",
             "translate_preference": "english_first",
+            "translate_zh": False,
             "enable_asr": True,
-            "translate_zh": True,
             "faster_whisper_model": "base",
             "proxy": True,
-            "enable_batch": True,
-            "batch_size": 20,
             "context_window": 5,
             "max_retries": 3,
             "enable_merge": False,
+            "enable_batch": True,
+            "batch_size": 10,
         }
 
     def get_api(self) -> List[Dict[str, Any]]:
