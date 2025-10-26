@@ -1361,7 +1361,7 @@ class AutoSubv3(_PluginBase):
                                             {
                                                 'component': 'a',
                                                 'props': {
-                                                    'href': 'https://github.com/TimoYoung/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
+                                                    'href': 'https://github.com/workroom2008/MoviePilot-Plugins/blob/main/plugins/autosubv3/README.md',
                                                     'target': '_blank'
                                                 },
                                                 'content': [
