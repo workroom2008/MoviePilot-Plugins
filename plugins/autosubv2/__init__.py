@@ -58,19 +58,19 @@ class TaskItem:
 
 class AutoSubv2(_PluginBase):
     # 插件名称
-    plugin_name = "AI字幕自动生成(v2)"
+    plugin_name = "AI字幕自动生成(日文版)"
     # 插件描述
-    plugin_desc = "使用whisper自动生成视频文件字幕,使用大模型翻译字幕成中文。"
+    plugin_desc = "专门用于日文视频的字幕自动生成和翻译"
     # 插件图标
     plugin_icon = "autosubtitles.jpeg"
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "2.2"
+    plugin_version = "3.0"
     # 插件作者
-    plugin_author = "TimoYoung"
+    plugin_author = "hongbo"
     # 作者主页
-    author_url = "https://github.com/TimoYoung"
+    author_url = "https://github.com/workroom2008"
     # 插件配置项ID前缀
     plugin_config_prefix = "autosubv2"
     # 加载顺序
@@ -119,7 +119,7 @@ class AutoSubv2(_PluginBase):
         self._send_notify = config.get('send_notify', False)
         self._file_size = int(config.get('file_size')) if config.get('file_size') else 10
         # 字幕生成设置
-        self._translate_preference = config.get('translate_preference', 'english_first')
+        self._translate_preference = config.get('translate_preference', 'japanese_first')
         self._enable_asr = config.get('enable_asr', True)
         if self._enable_asr:
             self._faster_whisper_model = config.get('faster_whisper_model', 'base')
@@ -394,8 +394,13 @@ class AutoSubv2(_PluginBase):
             model = WhisperModel(
                 download_model(self._faster_whisper_model, local_files_only=False, cache_dir=cache_dir),
                 device="cpu", compute_type="int8", cpu_threads=psutil.cpu_count(logical=False))
+            
+            # 关键修改：强制使用日文进行识别
+            if lang == 'auto':
+                lang = 'ja'  # 默认使用日文
+                
             segments, info = model.transcribe(audio_file,
-                                              language=lang if lang != 'auto' else None,
+                                              language=lang if lang != 'auto' else 'ja',  # 确保使用日文
                                               word_timestamps=True,
                                               vad_filter=True,
                                               temperature=0,
@@ -406,8 +411,8 @@ class AutoSubv2(_PluginBase):
                 lang = info.language
 
             subs = []
-            if lang in ['en', 'eng']:
-                # 英文先生成单词级别字幕，再合并
+            if lang in ['ja', 'jpn']:
+                # 日文先生成单词级别字幕，再合并
                 idx = 0
                 for segment in segments:
                     if self._event.is_set():
@@ -453,11 +458,11 @@ class AutoSubv2(_PluginBase):
             logger.error(f"获取视频文件元数据失败，跳过后续处理")
             return False, None, None
         # 获取字幕语言偏好
-        if self._translate_preference == "english_only":
-            prefer_subtitle_langs = ['en', 'eng']
+        if self._translate_preference == "japanese_only":
+            prefer_subtitle_langs = ['ja', 'jpn']
             strict = True
-        elif self._translate_preference == "english_first":
-            prefer_subtitle_langs = ['en', 'eng']
+        elif self._translate_preference == "japanese_first":
+            prefer_subtitle_langs = ['ja', 'jpn']
             strict = False
         else:  # self.translate_preference == "origin_first"
             prefer_subtitle_langs = None
@@ -470,10 +475,10 @@ class AutoSubv2(_PluginBase):
             return False, None, None
         if not iso639.find(audio_lang) or not iso639.to_iso639_1(audio_lang):
             logger.info(f"字幕源偏好：{self._translate_preference} 未从音轨元数据中获取到语言信息")
-            audio_lang = 'auto'
+            audio_lang = 'ja'  # 默认使用日文而不是auto
         # 当字幕源偏好为origin_first时，优先使用音轨语言
         if self._translate_preference == "origin_first":
-            prefer_subtitle_langs = ['en', 'eng'] if audio_lang == 'auto' else [audio_lang,
+            prefer_subtitle_langs = ['ja', 'jpn'] if audio_lang == 'auto' else [audio_lang,
                                                                                 iso639.to_iso639_1(audio_lang)]
         # 获取外挂字幕
         logger.info(f"使用 {prefer_subtitle_langs} 匹配已有外挂字幕文件 ...")
@@ -493,7 +498,7 @@ class AutoSubv2(_PluginBase):
             return os.path.join(video_dir, exist_sub_name)
 
         extract_subtitle = False
-        if self._translate_preference == "english_only":
+        if self._translate_preference == "japanese_only":
             if external_sub_exist:
                 logger.info(f"字幕源偏好：{self._translate_preference} 外挂字幕存在，字幕语言 {external_sub_lang}")
                 return True, iso639.to_iso639_1(external_sub_lang), get_sub_path()
@@ -502,7 +507,7 @@ class AutoSubv2(_PluginBase):
                 extract_subtitle = True
             else:
                 logger.info(f"字幕源偏好：{self._translate_preference} 未匹配到外挂或内嵌字幕,需要使用asr提取")
-        else:  # english_first/origin_first
+        else:  # japanese_first/origin_first
             if external_sub_exist and external_sub_lang in prefer_subtitle_langs:
                 logger.info(f"字幕源偏好：{self._translate_preference} 外挂字幕存在，字幕语言 {external_sub_lang}")
                 return True, iso639.to_iso639_1(external_sub_lang), get_sub_path()
@@ -550,12 +555,16 @@ class AutoSubv2(_PluginBase):
             ret, lang = self.__do_speech_recognition(audio_lang, audio_file.name)
             if ret:
                 logger.info(f"生成字幕成功，原始语言：{lang}")
+                # 关键修改：强制使用日文后缀
+                target_lang = 'ja'  # 强制使用日文后缀
+                target_subtitle_path = f"{subtitle_file}.{target_lang}.srt"
+                
                 # 复制字幕文件
-                SystemUtils.copy(Path(f"{audio_file.name}.srt"), Path(f"{subtitle_file}.{lang}.srt"))
-                logger.info(f"复制字幕文件：{subtitle_file}.{lang}.srt")
+                SystemUtils.copy(Path(f"{audio_file.name}.srt"), Path(target_subtitle_path))
+                logger.info(f"复制字幕文件：{target_subtitle_path}")
                 # 删除临时文件
                 os.remove(f"{audio_file.name}.srt")
-                return ret, lang, Path(f"{subtitle_file}.{lang}.srt")
+                return ret, target_lang, Path(target_subtitle_path)
             else:
                 logger.error(f"生成字幕失败")
                 return False, None, None
@@ -844,9 +853,9 @@ class AutoSubv2(_PluginBase):
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        if source_lang in ["en", "eng"] and self._enable_merge:
+        if source_lang in ["ja", "jpn"] and self._enable_merge:
             valid_subs = self.__merge_srt(subs)
-            logger.info(f"英文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
+            logger.info(f"日文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
         else:
             valid_subs = subs
         self._stats['total'] = len(valid_subs)
@@ -967,11 +976,11 @@ class AutoSubv2(_PluginBase):
             prefer_langs = ['zh', 'chi', 'zh-CN', 'chs', 'zhs', 'zh-Hans', 'zhong', 'simp', 'cn']
             strict = True
         else:
-            if self._translate_preference == "english_first":
-                prefer_langs = ['en', 'eng']
+            if self._translate_preference == "japanese_first":
+                prefer_langs = ['ja', 'jpn']
                 strict = False
-            elif self._translate_preference == "english_only":
-                prefer_langs = ['en', 'eng']
+            elif self._translate_preference == "japanese_only":
+                prefer_langs = ['ja', 'jpn']
                 strict = True
             else:
                 prefer_langs = None
@@ -1126,8 +1135,8 @@ class AutoSubv2(_PluginBase):
                                             'label': '字幕源语言偏好',
                                             'hint': '小语种视频存在多语言字幕/音轨时，优先选择哪种语言用于翻译',
                                             'items': [
-                                                {'title': '仅英文', 'value': 'english_only'},
-                                                {'title': '英文优先', 'value': 'english_first'},
+                                                {'title': '仅日文', 'value': 'japanese_only'},
+                                                {'title': '日文优先', 'value': 'japanese_first'},
                                                 {'title': '原音优先', 'value': 'origin_first'}
                                             ]
                                         }
@@ -1254,7 +1263,7 @@ class AutoSubv2(_PluginBase):
                                                                 'component': 'VSwitch',
                                                                 'props': {
                                                                     'model': 'enable_merge',
-                                                                    'label': '翻译英文时合并整句'
+                                                                    'label': '翻译日文时合并整句'
                                                                 }
                                                             }
                                                         ]
@@ -1367,7 +1376,7 @@ class AutoSubv2(_PluginBase):
             "run_now": False,
             "path_list": "",
             "file_size": "10",
-            "translate_preference": "english_first",
+            "translate_preference": "japanese_first",
             "translate_zh": False,
             "enable_asr": True,
             "faster_whisper_model": "base",
