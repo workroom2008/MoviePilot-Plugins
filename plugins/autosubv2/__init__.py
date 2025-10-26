@@ -58,19 +58,19 @@ class TaskItem:
 
 class AutoSubv2(_PluginBase):
     # 插件名称
-    plugin_name = "AI字幕自动生成(v2)"
+    plugin_name = "AI字幕自动生成(SEX)"
     # 插件描述
-    plugin_desc = "使用whisper自动生成视频文件字幕,使用大模型翻译字幕成中文。"
+    plugin_desc = "小姐姐AI字幕生成"
     # 插件图标
     plugin_icon = "autosubtitles.jpeg"
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "2.2"
+    plugin_version = "3.0"
     # 插件作者
-    plugin_author = "TimoYoung"
+    plugin_author = "workroom2008"
     # 作者主页
-    author_url = "https://github.com/TimoYoung"
+    author_url = "https://github.com/workroom2008"
     # 插件配置项ID前缀
     plugin_config_prefix = "autosubv2"
     # 加载顺序
@@ -119,7 +119,7 @@ class AutoSubv2(_PluginBase):
         self._send_notify = config.get('send_notify', False)
         self._file_size = int(config.get('file_size')) if config.get('file_size') else 10
         # 字幕生成设置
-        self._translate_preference = config.get('translate_preference', 'english_first')
+        self._translate_preference = config.get('translate_preference', 'japanese_first')
         self._enable_asr = config.get('enable_asr', True)
         if self._enable_asr:
             self._faster_whisper_model = config.get('faster_whisper_model', 'base')
@@ -128,20 +128,33 @@ class AutoSubv2(_PluginBase):
             self._huggingface_proxy = config.get('proxy', True)
         self._translate_zh = config.get('translate_zh', False)
         if self._translate_zh:
-            chatgpt = self.get_config("ChatGPT")
-            if not chatgpt:
-                logger.error(f"翻译依赖于ChatGPT，请先维护ChatGPT插件")
-                return
-            openai_key = chatgpt and chatgpt.get("openai_key")
-            openai_url = chatgpt and chatgpt.get("openai_url")
-            openai_proxy = chatgpt and chatgpt.get("proxy")
-            openai_model = chatgpt and chatgpt.get("model")
-            if not openai_key:
-                logger.error(f"翻译依赖于ChatGPT，请先维护openai_key")
-                return
+            use_chatgpt = config.get('use_chatgpt', True)
+            if use_chatgpt:
+                chatgpt = self.get_config("ChatGPT")
+                if not chatgpt:
+                    logger.error(f"翻译依赖于ChatGPT，请先维护ChatGPT插件")
+                    return
+                openai_key_str = chatgpt and chatgpt.get("openai_key")
+                openai_url = chatgpt and chatgpt.get("openai_url")
+                openai_proxy = chatgpt and chatgpt.get("proxy")
+                openai_model = chatgpt and chatgpt.get("model")
+                compatible = chatgpt and chatgpt.get("compatible")
+                if not openai_key_str:
+                    logger.error(f"请先在ChatGPT插件中维护openai_key")
+                    return
+                openai_key = [key.strip() for key in openai_key_str.split(',') if key.strip()][0]
+            else:
+                openai_key = config.get('openai_key')
+                if not openai_key:
+                    logger.error(f"翻译依赖于OpenAI，请先维护openai_key")
+                    return
+                openai_url = config.get('openai_url', "https://api.openai.com")
+                openai_proxy = config.get('openai_proxy', False)
+                openai_model = config.get('openai_model', "gpt-3.5-turbo")
+                compatible = config.get('compatible', False)
             self._openai = OpenAi(api_key=openai_key, api_url=openai_url,
                                   proxy=settings.PROXY if openai_proxy else None,
-                                  model=openai_model)
+                                  model=openai_model, compatible=bool(compatible))
             self._enable_batch = config.get('enable_batch', True)
             self._batch_size = int(config.get('batch_size')) if config.get('batch_size') else 10
             self._context_window = int(config.get('context_window')) if config.get('context_window') else 5
@@ -394,44 +407,49 @@ class AutoSubv2(_PluginBase):
             model = WhisperModel(
                 download_model(self._faster_whisper_model, local_files_only=False, cache_dir=cache_dir),
                 device="cpu", compute_type="int8", cpu_threads=psutil.cpu_count(logical=False))
-            segments, info = model.transcribe(audio_file,
-                                              language=lang if lang != 'auto' else None,
-                                              word_timestamps=True,
-                                              vad_filter=True,
-                                              temperature=0,
-                                              beam_size=5)
-            logger.info("Detected language '%s' with probability %f" % (info.language, info.language_probability))
+        
+        # 关键修改：强制使用日文进行识别
+        if lang == 'auto':
+            lang = 'ja'  # 默认使用日文
+            
+        segments, info = model.transcribe(audio_file,
+                                          language=lang if lang != 'auto' else 'ja',  # 确保使用日文
+                                          word_timestamps=True,
+                                          vad_filter=True,
+                                          temperature=0,
+                                          beam_size=5)
+        logger.info("Detected language '%s' with probability %f" % (info.language, info.language_probability))
 
-            if lang == 'auto':
-                lang = info.language
+        if lang == 'auto':
+            lang = info.language
 
-            subs = []
-            if lang in ['en', 'eng']:
-                # 英文先生成单词级别字幕，再合并
-                idx = 0
-                for segment in segments:
-                    if self._event.is_set():
-                        logger.info(f"whisper音轨转录服务停止")
-                        raise UserInterruptException(f"用户中断当前任务")
-                    for word in segment.words:
-                        idx += 1
-                        subs.append(srt.Subtitle(index=idx,
-                                                 start=timedelta(seconds=word.start),
-                                                 end=timedelta(seconds=word.end),
-                                                 content=word.word))
-                subs = self.__merge_srt(subs)
-            else:
-                for i, segment in enumerate(segments):
-                    if self._event.is_set():
-                        logger.info(f"whisper音轨转录服务停止")
-                        raise UserInterruptException(f"用户中断当前任务")
-                    subs.append(srt.Subtitle(index=i,
-                                             start=timedelta(seconds=segment.start),
-                                             end=timedelta(seconds=segment.end),
-                                             content=segment.text))
-            self.__save_srt(f"{audio_file}.srt", subs)
-            logger.info(f"音轨转字幕完成")
-            return True, lang
+        subs = []
+        if lang in ['ja', 'jpn']:
+            # 日文先生成单词级别字幕，再合并
+            idx = 0
+            for segment in segments:
+                if self._event.is_set():
+                    logger.info(f"whisper音轨转录服务停止")
+                    raise UserInterruptException(f"用户中断当前任务")
+                for word in segment.words:
+                    idx += 1
+                    subs.append(srt.Subtitle(index=idx,
+                                             start=timedelta(seconds=word.start),
+                                             end=timedelta(seconds=word.end),
+                                             content=word.word))
+            subs = self.__merge_srt(subs)
+        else:
+            for i, segment in enumerate(segments):
+                if self._event.is_set():
+                    logger.info(f"whisper音轨转录服务停止")
+                    raise UserInterruptException(f"用户中断当前任务")
+                subs.append(srt.Subtitle(index=i,
+                                         start=timedelta(seconds=segment.start),
+                                         end=timedelta(seconds=segment.end),
+                                         content=segment.text))
+        self.__save_srt(f"{audio_file}.srt", subs)
+        logger.info(f"音轨转字幕完成")
+        return True, lang
         except ImportError:
             logger.warn(f"faster-whisper 未安装，不进行处理")
             return False, None
@@ -453,11 +471,11 @@ class AutoSubv2(_PluginBase):
             logger.error(f"获取视频文件元数据失败，跳过后续处理")
             return False, None, None
         # 获取字幕语言偏好
-        if self._translate_preference == "english_only":
-            prefer_subtitle_langs = ['en', 'eng']
+        if self._translate_preference == "japanese_only":
+            prefer_subtitle_langs = ['ja', 'jpn']
             strict = True
-        elif self._translate_preference == "english_first":
-            prefer_subtitle_langs = ['en', 'eng']
+        elif self._translate_preference == "japanese_first":
+            prefer_subtitle_langs = ['ja', 'jpn']
             strict = False
         else:  # self.translate_preference == "origin_first"
             prefer_subtitle_langs = None
@@ -470,10 +488,10 @@ class AutoSubv2(_PluginBase):
             return False, None, None
         if not iso639.find(audio_lang) or not iso639.to_iso639_1(audio_lang):
             logger.info(f"字幕源偏好：{self._translate_preference} 未从音轨元数据中获取到语言信息")
-            audio_lang = 'auto'
+            audio_lang = 'ja'  # 默认使用日文而不是auto
         # 当字幕源偏好为origin_first时，优先使用音轨语言
         if self._translate_preference == "origin_first":
-            prefer_subtitle_langs = ['en', 'eng'] if audio_lang == 'auto' else [audio_lang,
+            prefer_subtitle_langs = ['ja', 'jpn'] if audio_lang == 'auto' else [audio_lang,
                                                                                 iso639.to_iso639_1(audio_lang)]
         # 获取外挂字幕
         logger.info(f"使用 {prefer_subtitle_langs} 匹配已有外挂字幕文件 ...")
@@ -493,7 +511,7 @@ class AutoSubv2(_PluginBase):
             return os.path.join(video_dir, exist_sub_name)
 
         extract_subtitle = False
-        if self._translate_preference == "english_only":
+        if self._translate_preference == "japanese_only":
             if external_sub_exist:
                 logger.info(f"字幕源偏好：{self._translate_preference} 外挂字幕存在，字幕语言 {external_sub_lang}")
                 return True, iso639.to_iso639_1(external_sub_lang), get_sub_path()
@@ -502,7 +520,7 @@ class AutoSubv2(_PluginBase):
                 extract_subtitle = True
             else:
                 logger.info(f"字幕源偏好：{self._translate_preference} 未匹配到外挂或内嵌字幕,需要使用asr提取")
-        else:  # english_first/origin_first
+        else:  # japanese_first/origin_first
             if external_sub_exist and external_sub_lang in prefer_subtitle_langs:
                 logger.info(f"字幕源偏好：{self._translate_preference} 外挂字幕存在，字幕语言 {external_sub_lang}")
                 return True, iso639.to_iso639_1(external_sub_lang), get_sub_path()
@@ -550,12 +568,16 @@ class AutoSubv2(_PluginBase):
             ret, lang = self.__do_speech_recognition(audio_lang, audio_file.name)
             if ret:
                 logger.info(f"生成字幕成功，原始语言：{lang}")
+                # 关键修改：强制使用日文后缀
+                target_lang = 'ja'  # 强制使用日文后缀
+                target_subtitle_path = f"{subtitle_file}.{target_lang}.srt"
+                
                 # 复制字幕文件
-                SystemUtils.copy(Path(f"{audio_file.name}.srt"), Path(f"{subtitle_file}.{lang}.srt"))
-                logger.info(f"复制字幕文件：{subtitle_file}.{lang}.srt")
+                SystemUtils.copy(Path(f"{audio_file.name}.srt"), Path(target_subtitle_path))
+                logger.info(f"复制字幕文件：{target_subtitle_path}")
                 # 删除临时文件
                 os.remove(f"{audio_file.name}.srt")
-                return ret, lang, Path(f"{subtitle_file}.{lang}.srt")
+                return ret, target_lang, Path(target_subtitle_path)
             else:
                 logger.error(f"生成字幕失败")
                 return False, None, None
@@ -709,7 +731,6 @@ class AutoSubv2(_PluginBase):
          D.S... sami                 SAMI subtitle
          ..S... srt                  SubRip subtitle with embedded timing
          ..S... ssa                  SSA (SubStation Alpha) subtitle
-         D.S... stl                  Spruce subtitle format
          DES... subrip               SubRip subtitle (decoders: srt subrip ) (encoders: srt subrip )
          D.S... subviewer            SubViewer subtitle
          D.S... subviewer1           SubViewer v1 subtitle
@@ -844,9 +865,9 @@ class AutoSubv2(_PluginBase):
     def __translate_zh_subtitle(self, source_lang: str, source_subtitle: str, dest_subtitle: str):
         self._stats = {'total': 0, 'batch_success': 0, 'batch_fail': 0, 'line_fallback': 0}
         subs = self.__load_srt(source_subtitle)
-        if source_lang in ["en", "eng"] and self._enable_merge:
+        if source_lang in ["ja", "jpn"] and self._enable_merge:
             valid_subs = self.__merge_srt(subs)
-            logger.info(f"英文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
+            logger.info(f"日文字幕合并：合并前字幕数: {len(subs)},合并后字幕数: {len(valid_subs)}")
         else:
             valid_subs = subs
         self._stats['total'] = len(valid_subs)
@@ -967,11 +988,11 @@ class AutoSubv2(_PluginBase):
             prefer_langs = ['zh', 'chi', 'zh-CN', 'chs', 'zhs', 'zh-Hans', 'zhong', 'simp', 'cn']
             strict = True
         else:
-            if self._translate_preference == "english_first":
-                prefer_langs = ['en', 'eng']
+            if self._translate_preference == "japanese_first":
+                prefer_langs = ['ja', 'jpn']
                 strict = False
-            elif self._translate_preference == "english_only":
-                prefer_langs = ['en', 'eng']
+            elif self._translate_preference == "japanese_only":
+                prefer_langs = ['ja', 'jpn']
                 strict = True
             else:
                 prefer_langs = None
@@ -1126,8 +1147,8 @@ class AutoSubv2(_PluginBase):
                                             'label': '字幕源语言偏好',
                                             'hint': '小语种视频存在多语言字幕/音轨时，优先选择哪种语言用于翻译',
                                             'items': [
-                                                {'title': '仅英文', 'value': 'english_only'},
-                                                {'title': '英文优先', 'value': 'english_first'},
+                                                {'title': '仅日文', 'value': 'japanese_only'},
+                                                {'title': '日文优先', 'value': 'japanese_first'},
                                                 {'title': '原音优先', 'value': 'origin_first'}
                                             ]
                                         }
@@ -1143,7 +1164,7 @@ class AutoSubv2(_PluginBase):
                                         'props': {
                                             'model': 'translate_zh',
                                             'label': '翻译成中文',
-                                            'hint': '需要配置ChatGPT插件'
+                                            'hint': '使用大模型翻译成中文字幕'
                                         }
                                     }
                                 ]
@@ -1210,7 +1231,143 @@ class AutoSubv2(_PluginBase):
                                 'content': [
                                     {
                                         'component': 'VExpansionPanelTitle',
-                                        'text': '大模型翻译设置'
+                                        'text': '大模型接口设置'
+                                    },
+                                    {
+                                        'component': 'VExpansionPanelText',
+                                        'content': [
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {'cols': 12, 'md': 4},
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'use_chatgpt',
+                                                                    'label': '复用ChatGPT插件配置'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VTextField',
+                                                        'props': {
+                                                            'model': 'use_chatgpt_trigger',
+                                                            'class': 'd-none',
+                                                            'text': 'trigger',
+                                                            'change': 'use_chatgpt_trigger = use_chatgpt ? 1 : 0'
+                                                        }
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                            'md': 4,
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'openai_proxy',
+                                                                    'label': '使用代理服务器',
+                                                                    'v-show': '!use_chatgpt',
+                                                                    'v-if': '!use_chatgpt'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                            'md': 4,
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VSwitch',
+                                                                'props': {
+                                                                    'model': 'compatible',
+                                                                    'label': '兼容模式',
+                                                                    'v-show': '!use_chatgpt'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                'component': 'VRow',
+                                                'content': [
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                            'md': 4
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'openai_url',
+                                                                    'label': 'OpenAI API Url',
+                                                                    'placeholder': 'https://api.openai.com',
+                                                                    'v-show': '!use_chatgpt'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                            'md': 4
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'openai_key',
+                                                                    'label': 'API密钥',
+                                                                    'placeholder': 'sk-xxx',
+                                                                    'v-show': '!use_chatgpt'
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        'component': 'VCol',
+                                                        'props': {
+                                                            'cols': 12,
+                                                            'md': 4
+                                                        },
+                                                        'content': [
+                                                            {
+                                                                'component': 'VTextField',
+                                                                'props': {
+                                                                    'model': 'openai_model',
+                                                                    'label': '自定义模型',
+                                                                    'placeholder': 'gpt-3.5-turbo',
+                                                                    'v-show': '!use_chatgpt'
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VExpansionPanel',
+                                'props': {'v-show': 'translate_zh'},
+                                'content': [
+                                    {
+                                        'component': 'VExpansionPanelTitle',
+                                        'text': '翻译参数设置'
                                     },
                                     {
                                         'component': 'VExpansionPanelText',
@@ -1254,7 +1411,7 @@ class AutoSubv2(_PluginBase):
                                                                 'component': 'VSwitch',
                                                                 'props': {
                                                                     'model': 'enable_merge',
-                                                                    'label': '翻译英文时合并整句'
+                                                                    'label': '翻译日文时合并整句'
                                                                 }
                                                             }
                                                         ]
@@ -1292,27 +1449,6 @@ class AutoSubv2(_PluginBase):
                                                         ]
                                                     }
                                                 ]
-                                            },
-                                            {
-                                                'component': 'VRow',
-                                                'content': [
-                                                    {
-                                                        'component': 'VCol',
-                                                        'props': {
-                                                            'cols': 12,
-                                                        },
-                                                        'content': [
-                                                            {
-                                                                'component': 'VAlert',
-                                                                'props': {
-                                                                    'type': 'info',
-                                                                    'variant': 'tonal',
-                                                                    'text': '翻译依赖 ChatGPT 插件配置'
-                                                                }
-                                                            }
-                                                        ]
-                                                    }
-                                                ]
                                             }
                                         ]
                                     }
@@ -1341,7 +1477,7 @@ class AutoSubv2(_PluginBase):
                                             {
                                                 'component': 'a',
                                                 'props': {
-                                                    'href': 'https://github.com/TimoYoung/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
+                                                    'href': 'https://github.com/jxxghp/MoviePilot-Plugins/blob/main/plugins/autosubv2/README.md',
                                                     'target': '_blank'
                                                 },
                                                 'content': [
@@ -1367,11 +1503,18 @@ class AutoSubv2(_PluginBase):
             "run_now": False,
             "path_list": "",
             "file_size": "10",
-            "translate_preference": "english_first",
+            "translate_preference": "japanese_first",
             "translate_zh": False,
             "enable_asr": True,
             "faster_whisper_model": "base",
             "proxy": True,
+            "use_chatgpt": True,
+            "use_chatgpt_trigger": 0,
+            "openai_proxy": False,
+            "compatible": False,
+            "openai_url": "https://api.openai.com",
+            "openai_key": None,
+            "openai_model": "gpt-3.5-turbo",
             "context_window": 5,
             "max_retries": 3,
             "enable_merge": False,
