@@ -66,7 +66,7 @@ class AutoSubv2(_PluginBase):
     # 主题色
     plugin_color = "#2C4F7E"
     # 插件版本
-    plugin_version = "3.0"
+    plugin_version = "3.1"
     # 插件作者
     plugin_author = "hongbo"
     # 作者主页
@@ -473,9 +473,20 @@ class AutoSubv2(_PluginBase):
         if not ret:
             logger.info(f"字幕源偏好：{self._translate_preference} 获取音轨元数据失败")
             return False, None, None
-        if not iso639.find(audio_lang) or not iso639.to_iso639_1(audio_lang):
-            logger.info(f"字幕源偏好：{self._translate_preference} 未从音轨元数据中获取到语言信息")
-            audio_lang = 'ja'  # 默认使用日文而不是auto
+        
+        # 关键修改：处理音轨语言信息
+        if audio_lang and audio_lang != 'und':
+            # 如果音轨语言是英文，强制改为日文
+            if audio_lang in ['en', 'eng']:
+                logger.info(f"检测到英文音轨，强制使用日文识别")
+                audio_lang = 'ja'
+            elif not iso639.find(audio_lang) or not iso639.to_iso639_1(audio_lang):
+                logger.info(f"字幕源偏好：{self._translate_preference} 未从音轨元数据中获取到有效语言信息，使用日文")
+                audio_lang = 'ja'
+        else:
+            logger.info(f"字幕源偏好：{self._translate_preference} 未从音轨元数据中获取到语言信息，使用日文")
+            audio_lang = 'ja'
+            
         # 当字幕源偏好为origin_first时，优先使用音轨语言
         if self._translate_preference == "origin_first":
             prefer_subtitle_langs = ['ja', 'jpn'] if audio_lang == 'auto' else [audio_lang,
