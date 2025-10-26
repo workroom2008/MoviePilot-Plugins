@@ -1,6 +1,6 @@
 # MoviePilot-Plugin-Market
 
-MoviePilot三方插件市场：https://github.com/workroom008/MoviePilot-Plugins/
+MoviePilot三方插件市场：https://github.com/workroom2008/MoviePilot-Plugins/
 
 
 ### 插件新增
