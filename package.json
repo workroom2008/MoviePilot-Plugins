@@ -17,7 +17,7 @@
         "name": "AI字幕自动生成(FR)",
         "description": "使用whisper自动生成视频文件字幕,使用大模型翻译字幕成中文。",
         "labels": "字幕",
-        "version": "4.0",
+        "version": "4.1",
         "icon": "hongbo.jpeg",
         "author": "hongbo",
         "level": 1,
