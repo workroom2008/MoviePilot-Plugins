@@ -24,8 +24,8 @@ from app.schemas.types import NotificationType, EventType
 from app.log import logger
 from app.plugins import _PluginBase
 from app.utils.system import SystemUtils
-from plugins.autosubv2.ffmpeg import Ffmpeg
-from plugins.autosubv2.translate.openai_translate import OpenAi
+from plugins.autosubv3.ffmpeg import Ffmpeg
+from plugins.autosubv3.translate.openai_translate import OpenAi
 
 
 class UserInterruptException(Exception):
@@ -56,7 +56,7 @@ class TaskItem:
     complete_time: datetime = None
 
 
-class AutoSubv2(_PluginBase):
+class AutoSubv3(_PluginBase):
     # 插件名称
     plugin_name = "AI字幕自动生成(日文版)"
     # 插件描述
@@ -72,7 +72,7 @@ class AutoSubv2(_PluginBase):
     # 作者主页
     author_url = "https://github.com/workroom2008"
     # 插件配置项ID前缀
-    plugin_config_prefix = "autosubv2"
+    plugin_config_prefix = "autosubv3"
     # 加载顺序
     plugin_order = 14
     # 可使用的用户级别
