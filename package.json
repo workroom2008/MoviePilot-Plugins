@@ -1,5 +1,5 @@
 {
-      "AutoSubv3": {
+  "AutoSubv3": {
         "name": "AI字幕自动生成(JP)",
         "description": "使用whisper自动生成视频文件字幕,使用大模型翻译字幕成中文。",
         "labels": "字幕",
@@ -11,10 +11,9 @@
         "history": {
           "v3.1": "更改文件结构，和旧版本的不再冲突",
         }
-      }
-      
- },
-      "AutoSubv4": {
+  },
+
+  "AutoSubv4": {
         "name": "AI字幕自动生成(FR)",
         "description": "使用whisper自动生成视频文件字幕,使用大模型翻译字幕成中文。",
         "labels": "字幕",
@@ -26,5 +25,6 @@
         "history": {
           "v4.1": "更改文件结构，和旧版本的不再冲突",
         }
-      }
       
+ },
+ }
