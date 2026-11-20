@@ -1,0 +1,18 @@
+{
+  "WeComIPGuard": {
+    "name": "企业微信可信IP守护",
+    "description": "自动把动态公网 IPv4 同步到企业微信应用的可信IP列表。IP 采用 IPv4 专用源并做地址合法性校验；Cookie 保活优先使用纯 HTTP 探活，仅在探活失败时才启动浏览器内核，显著降低 CPU 占用。支持 CookieCloud、内置扫码登录、手机验证码、待同步自动补写与状态面板。",
+    "labels": [
+      "工具",
+      "企业微信"
+    ],
+    "version": "1.0.0",
+    "icon": "https://raw.githubusercontent.com/workroom2008/MoviePilot-Plugins/main/icons/wecomipguard.png",
+    "author": "workroom2008",
+    "level": 1,
+    "system_version": ">=3.0.0",
+    "history": {
+      "v1.0.0": "首个版本：IPv4 专用源与严格校验、HTTP 探活保活、待同步补写、状态面板、可配置周期与超时。"
+    }
+  }
+}
