@@ -49,7 +49,7 @@ class WeComIPGuard(_PluginBase):
         "支持 IPv4 严格校验、CookieCloud、扫码登录、手机验证码、Cookie 保活与待同步自动补写。"
     )
     plugin_icon = "wecomipguard.png"
-    plugin_version = "1.1.0"
+    plugin_version = "1.2.0"
     plugin_author = "workroom2008"
     author_url = "https://github.com/workroom2008"
     plugin_config_prefix = "wecomipguard_"
