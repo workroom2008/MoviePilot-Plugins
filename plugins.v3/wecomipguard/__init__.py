@@ -26,9 +26,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.sdk.events import eventmanager, Event
-from app.schemas.types import EventType, MessageChannel, NotificationType
+from app.schemas.types import EventType, NotificationChannel, MessageType
 from app.sdk.logging import logger
-from app.plugins import _PluginBase
+from app.sdk.plugin import _PluginBase
 from app.sdk.config import settings
 from app.adapters.external.cookiecloud import CookieCloudHelper
 
@@ -187,6 +187,17 @@ class WeComIPGuard(_PluginBase):
         self._pending_sync = False
         self._urls = []
         self._cookie_from_cloud = ""
+        # 调度器交由 init_plugin/stop_service 管理，这里显式置空便于重复初始化
+        self._scheduler = None
+        # 运行态字段一并重置，避免复用实例时残留上一轮的展示状态
+        self._current_ip = ""
+        self._ip_source = ""
+        self._ip_checked_at = ""
+        self._ip_error = ""
+        self._sync_at = ""
+        self._sync_result = ""
+        self._sync_detail = []
+        self._last_probe_mode = ""
 
     def _load_config(self, config: dict):
         """从持久化配置恢复字段，缺省值保持默认。"""
@@ -290,7 +301,7 @@ class WeComIPGuard(_PluginBase):
             if event and self._notify:
                 self.post_message(
                     channel=self._event_channel(event),
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title="公网IP获取失败",
                     text="所有IP源均不可用，请检查网络或在插件配置中更换IP源。",
                     userid=self._qr_send_users,
@@ -304,7 +315,7 @@ class WeComIPGuard(_PluginBase):
             if event and self._notify:
                 self.post_message(
                     channel=self._event_channel(event),
-                    mtype=NotificationType.Plugin,
+                    mtype=MessageType.Plugin,
                     title=f"公网IP未变化：{ip}",
                     userid=self._qr_send_users,
                 )
@@ -325,7 +336,7 @@ class WeComIPGuard(_PluginBase):
         if event and self._notify:
             self.post_message(
                 channel=self._event_channel(event),
-                mtype=NotificationType.Plugin,
+                mtype=MessageType.Plugin,
                 title="IP检测完成",
                 text=f"当前IP：{ip}\n同步结果：{self._sync_result or '未执行'}",
                 userid=self._qr_send_users,
@@ -662,8 +673,8 @@ class WeComIPGuard(_PluginBase):
 
         if notify and self._notify:
             self.post_message(
-                channel=MessageChannel.Wechat,
-                mtype=NotificationType.Plugin,
+                channel=NotificationChannel.Wechat,
+                mtype=MessageType.Plugin,
                 title="企业微信可信IP已更新",
                 text=f"当前IP：{target}\n" + "\n".join(detail),
                 userid=self._qr_send_users,
@@ -723,8 +734,8 @@ class WeComIPGuard(_PluginBase):
         logger.info("开始登录企业微信")
         if self._notify:
             self.post_message(
-                channel=MessageChannel.Wechat,
-                mtype=NotificationType.Plugin,
+                channel=NotificationChannel.Wechat,
+                mtype=MessageType.Plugin,
                 title="开始登录企业微信",
                 userid=self._qr_send_users,
             )
@@ -745,8 +756,8 @@ class WeComIPGuard(_PluginBase):
 
                 if self._notify:
                     self.post_message(
-                        channel=MessageChannel.Wechat,
-                        mtype=NotificationType.Plugin,
+                        channel=NotificationChannel.Wechat,
+                        mtype=MessageType.Plugin,
                         title="点击扫描二维码登录企业微信",
                         image=absolute,
                         link=absolute,
@@ -763,8 +774,8 @@ class WeComIPGuard(_PluginBase):
                 logger.info("登录企业微信成功")
                 if self._notify:
                     self.post_message(
-                        channel=MessageChannel.Wechat,
-                        mtype=NotificationType.Plugin,
+                        channel=NotificationChannel.Wechat,
+                        mtype=MessageType.Plugin,
                         title="登录企业微信成功",
                         userid=self._qr_send_users,
                     )
@@ -828,8 +839,8 @@ class WeComIPGuard(_PluginBase):
 
         if self._notify:
             self.post_message(
-                channel=MessageChannel.Wechat,
-                mtype=NotificationType.Plugin,
+                channel=NotificationChannel.Wechat,
+                mtype=MessageType.Plugin,
                 title="检测到登录验证，请以 #123456 格式回复验证码，两分钟内有效",
                 userid=self._qr_send_users,
             )
@@ -848,8 +859,8 @@ class WeComIPGuard(_PluginBase):
             if "mobile_confirm" in page.url:
                 if self._notify:
                     self.post_message(
-                        channel=MessageChannel.Wechat,
-                        mtype=NotificationType.Plugin,
+                        channel=NotificationChannel.Wechat,
+                        mtype=MessageType.Plugin,
                         title="验证码可能错误，请重新回复 #123456",
                         userid=self._qr_send_users,
                     )
@@ -880,8 +891,8 @@ class WeComIPGuard(_PluginBase):
         if self._schedule_login:
             if self._notify:
                 self.post_message(
-                    channel=MessageChannel.Wechat,
-                    mtype=NotificationType.Plugin,
+                    channel=NotificationChannel.Wechat,
+                    mtype=MessageType.Plugin,
                     title="登录失败",
                     text="已开启自动登录，稍后重试。",
                     userid=self._qr_send_users,
@@ -890,8 +901,8 @@ class WeComIPGuard(_PluginBase):
         else:
             if self._notify:
                 self.post_message(
-                    channel=MessageChannel.Wechat,
-                    mtype=NotificationType.Plugin,
+                    channel=NotificationChannel.Wechat,
+                    mtype=MessageType.Plugin,
                     title="登录失败",
                     text="如需再次登录，请回复\n#登录企业微信",
                     userid=self._qr_send_users,
@@ -920,8 +931,8 @@ class WeComIPGuard(_PluginBase):
         if self._cookie_valid or not self._notify:
             return
         self.post_message(
-            channel=MessageChannel.Wechat,
-            mtype=NotificationType.Plugin,
+            channel=NotificationChannel.Wechat,
+            mtype=MessageType.Plugin,
             title="企业微信Cookie失效",
             text="回复下述指令唤起一次登录\n#登录企业微信",
             userid=self._qr_send_users,
@@ -951,8 +962,8 @@ class WeComIPGuard(_PluginBase):
             if self._cookie_valid:
                 if self._notify:
                     self.post_message(
-                        channel=MessageChannel.Wechat,
-                        mtype=NotificationType.Plugin,
+                        channel=NotificationChannel.Wechat,
+                        mtype=MessageType.Plugin,
                         title="缓存有效，无需登录",
                         userid=self._qr_send_users,
                     )
@@ -962,7 +973,7 @@ class WeComIPGuard(_PluginBase):
     @staticmethod
     def _event_channel(event: Event):
         data = event.event_data or {}
-        return data.get("channel") or MessageChannel.Wechat
+        return data.get("channel") or NotificationChannel.Wechat
 
     def get_state(self) -> bool:
         return self._enabled
