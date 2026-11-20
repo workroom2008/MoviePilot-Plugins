@@ -1,0 +1,19 @@
+{
+  "WeComIPGuard": {
+    "name": "企业微信可信IP助手",
+    "description": "自动检测动态公网 IP 并同步到企业微信（WeCom / 企微）应用的可信IP白名单，解决企业微信应用「not allow to access from your ip」报错。支持 IPv4 严格校验、CookieCloud、扫码登录、手机验证码、Cookie 保活与待同步自动补写。",
+    "labels": "企业微信,企微,可信IP,动态IP,DDNS,工具",
+    "version": "1.2.0",
+    "icon": "wecomipguard.png",
+    "author": "workroom2008",
+    "level": 1,
+    "system_version": ">=3.0.0",
+    "release": true,
+    "v2": false,
+    "history": {
+      "v1.2.0": "修复：改用 V3 稳定导入路径（app.sdk.plugin._PluginBase、NotificationChannel、MessageType）；pyproject 元数据改为官方规范；补全 _reset_config 对调度器与运行态字段的重置。更换图标。",
+      "v1.1.0": "重做详情页为状态仪表盘，配置页改为分区卡片；插件更名为「企业微信可信IP助手」。",
+      "v1.0.0": "首个版本：IPv4 专用源与严格校验、HTTP 探活保活、待同步补写、状态面板。"
+    }
+  }
+}
