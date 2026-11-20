@@ -60,14 +60,19 @@ class TestPluginMetadata:
     def test_metadata(self):
         plugin = _make_plugin()
         assert plugin.plugin_name == "企业微信可信IP助手"
-        assert plugin.plugin_version == "1.1.0"
+        assert plugin.plugin_version == "1.3.0"
         assert plugin.plugin_config_prefix == "wecomipguard_"
         assert plugin.plugin_author == "workroom2008"
         assert plugin.auth_level == 1
 
-    def test_icon_is_local_file(self):
-        """图标必须是仓库 icons/ 下的文件名，不能是完整 URL。"""
-        assert not WeComIPGuard.plugin_icon.startswith(("http://", "https://"))
+    def test_icon_is_full_url(self):
+        """第三方仓库的图标必须是完整 URL。
+
+        宿主前端 PluginCard 的规则：plugin_icon 以 http 开头才走图片代理，
+        否则请求静态路径 /plugin_icon/<文件名>——该目录只包含官方插件图标，
+        第三方图标放在这里必然 404，会回退成默认拼图。
+        """
+        assert WeComIPGuard.plugin_icon.startswith(("http://", "https://"))
         assert WeComIPGuard.plugin_icon.endswith(".png")
 
 
