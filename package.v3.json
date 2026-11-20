@@ -1,17 +1,15 @@
 {
   "WeComIPGuard": {
-    "name": "企业微信可信IP守护",
-    "description": "自动把动态公网 IPv4 同步到企业微信应用的可信IP列表。IP 采用 IPv4 专用源并做地址合法性校验；Cookie 保活优先使用纯 HTTP 探活，仅在探活失败时才启动浏览器内核，显著降低 CPU 占用。支持 CookieCloud、内置扫码登录、手机验证码、待同步自动补写与状态面板。",
-    "labels": [
-      "工具",
-      "企业微信"
-    ],
-    "version": "1.0.0",
-    "icon": "https://raw.githubusercontent.com/workroom2008/MoviePilot-Plugins/main/icons/wecomipguard.png",
+    "name": "企业微信可信IP助手",
+    "description": "自动检测动态公网 IP 并同步到企业微信（WeCom / 企微）应用的可信IP白名单，解决企业微信应用「not allow to access from your ip」报错。支持 IPv4 严格校验、CookieCloud、扫码登录、手机验证码、Cookie 保活与待同步自动补写。",
+    "labels": "企业微信,企微,可信IP,动态IP,DDNS,工具",
+    "version": "1.1.0",
+    "icon": "wecomipguard.png",
     "author": "workroom2008",
     "level": 1,
     "system_version": ">=3.0.0",
     "history": {
+      "v1.1.0": "重做详情页为状态仪表盘：状态环 + 当前IP 主视觉 + 四格指标，仅在异常时展开明细与二维码；配置页改为分区卡片并折叠高级项。插件更名为「企业微信可信IP助手」，补充搜索关键词，元数据改为符合官方规范的本地图标与逗号分隔标签。",
       "v1.0.0": "首个版本：IPv4 专用源与严格校验、HTTP 探活保活、待同步补写、状态面板、可配置周期与超时。"
     }
   }

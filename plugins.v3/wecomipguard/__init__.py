@@ -42,10 +42,14 @@ except Exception as err:  # pragma: no cover - 取决于运行时镜像
 
 class WeComIPGuard(_PluginBase):
     # ---- 插件元数据 ----
-    plugin_name = "企业微信可信IP守护"
-    plugin_desc = "自动把动态公网 IPv4 同步到企业微信应用的可信IP列表；纯 HTTP 保活，仅在必要时启动浏览器。"
-    plugin_icon = "https://raw.githubusercontent.com/workroom2008/MoviePilot-Plugins/main/icons/wecomipguard.png"
-    plugin_version = "1.0.0"
+    plugin_name = "企业微信可信IP助手"
+    plugin_desc = (
+        "自动检测动态公网 IP 并同步到企业微信（WeCom / 企微）应用的可信IP白名单，"
+        "解决企业微信应用「not allow to access from your ip」报错。"
+        "支持 IPv4 严格校验、CookieCloud、扫码登录、手机验证码、Cookie 保活与待同步自动补写。"
+    )
+    plugin_icon = "wecomipguard.png"
+    plugin_version = "1.1.0"
     plugin_author = "workroom2008"
     author_url = "https://github.com/workroom2008"
     plugin_config_prefix = "wecomipguard_"
@@ -1069,218 +1073,392 @@ class WeComIPGuard(_PluginBase):
         return datetime.now(tz=pytz.timezone(settings.TZ)).strftime("%Y-%m-%d %H:%M:%S")
 
     # ------------------------------------------------------------------ 页面
+    # ------------------------------------------------------------------ 页面
     def get_page(self) -> List[dict]:
-        """插件详情页：状态卡片 + 同步明细。"""
-        if not self._enabled:
-            status_text, status_color = "插件未启用", "#9E9E9E"
-        elif self._cookie_valid:
-            status_text, status_color = "Cookie 有效", "#43A047"
-        else:
-            status_text, status_color = "Cookie 失效", "#E53935"
+        """
+        详情页：状态仪表盘。
 
-        sync_text = self._sync_result or "尚未同步"
-        sync_color = "#43A047" if sync_text.startswith("成功") else "#FB8C00"
+        布局：顶部状态环 + 当前IP 主视觉，中部四格指标，底部仅在异常时展开明细。
+        全部使用 rgb(var(--v-theme-*)) 令牌，自动跟随明暗主题。
+        """
+        danger = "rgb(var(--v-theme-error))"
+        ok = "rgb(var(--v-theme-success))"
+        warn = "rgb(var(--v-theme-warning))"
+        primary = "rgb(var(--v-theme-primary))"
+        on_surface = "rgb(var(--v-theme-on-surface))"
+        surface = "rgb(var(--v-theme-surface))"
+        surface_variant = "rgb(var(--v-theme-surface-variant))"
 
-        cards = [
-            self._stat_card("Cookie 状态", status_text, status_color),
-            self._stat_card("当前公网IP", self._current_ip or "未知", "#1E88E5"),
-            self._stat_card("同步状态", sync_text, sync_color),
-            self._stat_card("待同步", "是" if self._pending_sync else "否", "#FB8C00" if self._pending_sync else "#43A047"),
-        ]
-
-        rows: List[dict] = [card for card in cards]
-
-        rows.append(
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "text": (
-                                        f"IP来源：{self._ip_source or '未检测'}　|　"
-                                        f"检测时间：{self._ip_checked_at or '-'}　|　"
-                                        f"保活方式：{self._last_probe_mode or '-'}"
-                                    ),
-                                },
-                            }
-                        ],
-                    }
-                ],
-            }
+        muted = f"color: {on_surface}; opacity: .62;"
+        card_style = (
+            f"background-color: {surface}; color: {on_surface}; "
+            f"border: 1px solid rgba(var(--v-theme-on-surface), .12); "
+            f"border-radius: 14px;"
         )
 
-        if self._ip_error:
-            rows.append(
+        # ---- 主状态判定 ----
+        if not self._enabled:
+            ring_color, ring_text, headline, sub = "#9E9E9E", "—", "插件未启用", "启用后开始守护可信IP"
+        elif not self._cookie_valid:
+            ring_color, ring_text, headline, sub = "#E53935", "!", "登录态失效", "回复 #登录企业微信 重新扫码"
+        elif self._pending_sync:
+            ring_color, ring_text, headline, sub = "#FB8C00", "…", "等待同步", "Cookie 恢复后会自动补写"
+        elif (self._sync_result or "").startswith("成功"):
+            ring_color, ring_text, headline, sub = "#43A047", "✓", "一切正常", "可信IP已与企业微信同步"
+        else:
+            ring_color, ring_text, headline, sub = "#1E88E5", "•", "运行中", "尚未执行过同步"
+
+        app_count = sum(1 for u in self._urls if u.strip())
+
+        # ---- 状态环（纯 CSS 圆环）----
+        ring = {
+            "component": "div",
+            "props": {
+                "style": (
+                    f"width: 76px; height: 76px; border-radius: 50%; flex: 0 0 76px; "
+                    f"border: 4px solid {ring_color}; "
+                    f"display: flex; align-items: center; justify-content: center; "
+                    f"font-size: 34px; font-weight: 700; line-height: 1; "
+                    f"color: {ring_color};"
+                )
+            },
+            "text": ring_text,
+        }
+
+        ip_display = self._current_ip or "未知"
+        header = {
+            "component": "div",
+            "props": {
+                "style": (
+                    f"{card_style} padding: 18px 20px; "
+                    f"display: flex; align-items: center; gap: 18px;"
+                )
+            },
+            "content": [
+                ring,
                 {
-                    "component": "VRow",
+                    "component": "div",
+                    "props": {"style": "min-width: 0; flex: 1 1 auto;"},
                     "content": [
                         {
-                            "component": "VCol",
-                            "props": {"cols": 12},
-                            "content": [
-                                {
-                                    "component": "VAlert",
-                                    "props": {
-                                        "type": "error",
-                                        "variant": "tonal",
-                                        "text": f"IP获取异常：{self._ip_error}",
-                                    },
-                                }
-                            ],
-                        }
+                            "component": "div",
+                            "props": {
+                                "style": (
+                                    f"font-family: ui-monospace, SFMono-Regular, Menlo, monospace; "
+                                    f"font-size: 26px; font-weight: 700; letter-spacing: .5px; "
+                                    f"color: {primary}; line-height: 1.2; word-break: break-all;"
+                                )
+                            },
+                            "text": ip_display,
+                        },
+                        {
+                            "component": "div",
+                            "props": {"style": f"margin-top: 6px; font-size: 14px; font-weight: 600; color: {on_surface};"},
+                            "text": headline,
+                        },
+                        {
+                            "component": "div",
+                            "props": {"style": f"margin-top: 2px; font-size: 12px; {muted}"},
+                            "text": sub,
+                        },
                     ],
-                }
-            )
-
-        if self._sync_detail:
-            for item in self._sync_detail:
-                rows.append(
-                    {
-                        "component": "VRow",
-                        "content": [
-                            {
-                                "component": "VCol",
-                                "props": {"cols": 12},
-                                "content": [
-                                    {
-                                        "component": "VAlert",
-                                        "props": {
-                                            "type": "success" if "成功" in item else "warning",
-                                            "variant": "tonal",
-                                            "text": item,
-                                        },
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                )
-
-        if not self._cookie_valid and os.path.exists(self._qr_path):
-            with open(self._qr_path, "rb") as file:
-                import base64
-
-                encoded = base64.b64encode(file.read()).decode("utf-8")
-            rows.append(
-                {
-                    "component": "img",
-                    "props": {
-                        "src": f"data:image/png;base64,{encoded}",
-                        "style": {"maxWidth": "100%", "display": "block", "margin": "0 auto"},
-                    },
-                }
-            )
-
-        rows.append(
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "text": "回复 #登录企业微信 可重新扫码；IP同步失败时页面会保留待同步标记，Cookie恢复后自动补写。",
-                                },
-                            }
-                        ],
-                    }
-                ],
-            }
-        )
-        return rows
-
-    @staticmethod
-    def _stat_card(label: str, value: str, color: str) -> dict:
-        return {
-            "component": "VCol",
-            "props": {"cols": 6, "md": 3},
-            "content": [
+                },
                 {
                     "component": "div",
                     "props": {
-                        "style": {
-                            "border": f"1px solid {color}",
-                            "borderRadius": "8px",
-                            "padding": "12px",
-                            "textAlign": "center",
-                        }
+                        "style": (
+                            f"flex: 0 0 auto; text-align: right; font-size: 12px; {muted} "
+                            f"display: flex; flex-direction: column; gap: 4px;"
+                        )
+                    },
+                    "content": [
+                        {"component": "div", "text": f"应用 {app_count} 个"},
+                        {
+                            "component": "div",
+                            "text": f"检测 {self._ip_checked_at[11:16] if self._ip_checked_at else '—'}",
+                        },
+                    ],
+                },
+            ],
+        }
+
+        # ---- 四格指标 ----
+        def metric(icon: str, value: str, label: str, color: str) -> dict:
+            return {
+                "component": "div",
+                "props": {
+                    "style": (
+                        f"{card_style} padding: 12px 14px; "
+                        f"display: flex; align-items: center; gap: 10px; min-width: 0;"
+                    )
+                },
+                "content": [
+                    {
+                        "component": "VIcon",
+                        "props": {"size": 22, "style": f"color: {color}; flex: 0 0 auto;"},
+                        "text": icon,
+                    },
+                    {
+                        "component": "div",
+                        "props": {"style": "min-width: 0;"},
+                        "content": [
+                            {
+                                "component": "div",
+                                "props": {
+                                    "style": (
+                                        f"font-size: 15px; font-weight: 600; color: {on_surface}; "
+                                        f"line-height: 1.3; white-space: nowrap; overflow: hidden; "
+                                        f"text-overflow: ellipsis;"
+                                    )
+                                },
+                                "text": value,
+                            },
+                            {
+                                "component": "div",
+                                "props": {"style": f"font-size: 11px; {muted}"},
+                                "text": label,
+                            },
+                        ],
+                    },
+                ],
+            }
+
+        sync_ok = (self._sync_result or "").startswith("成功")
+        metrics = {
+            "component": "div",
+            "props": {
+                "style": (
+                    "display: grid; gap: 10px; margin-top: 12px; "
+                    "grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));"
+                )
+            },
+            "content": [
+                metric(
+                    "mdi-check-circle-outline" if sync_ok else "mdi-alert-circle-outline",
+                    self._sync_result or "未同步",
+                    "同步状态",
+                    ok if sync_ok else warn,
+                ),
+                metric(
+                    "mdi-shield-check-outline" if self._cookie_valid else "mdi-shield-alert-outline",
+                    "有效" if self._cookie_valid else "失效",
+                    "登录态",
+                    ok if self._cookie_valid else danger,
+                ),
+                metric(
+                    "mdi-sync" if self._pending_sync else "mdi-sync-off",
+                    "待补写" if self._pending_sync else "无",
+                    "待同步",
+                    warn if self._pending_sync else ok,
+                ),
+                metric(
+                    "mdi-flash-outline",
+                    self._last_probe_mode or "—",
+                    "保活方式",
+                    primary,
+                ),
+            ],
+        }
+
+        blocks: List[dict] = [
+            {"component": "div", "props": {"style": "padding: 4px 0;"}, "content": [header, metrics]}
+        ]
+
+        # ---- 异常提示（仅异常时出现）----
+        if self._ip_error:
+            blocks.append(
+                {
+                    "component": "div",
+                    "props": {
+                        "style": (
+                            f"margin-top: 12px; padding: 12px 14px; border-radius: 10px; "
+                            f"background-color: rgba(var(--v-theme-error), .12); "
+                            f"border: 1px solid rgba(var(--v-theme-error), .30); "
+                            f"color: {danger}; font-size: 13px;"
+                        )
                     },
                     "content": [
                         {
                             "component": "div",
-                            "text": label,
-                            "props": {"style": {"fontSize": "13px", "color": "#888"}},
-                        },
-                        {
-                            "component": "div",
-                            "text": value,
-                            "props": {
-                                "style": {
-                                    "fontSize": "18px",
-                                    "fontWeight": "bold",
-                                    "color": color,
-                                    "marginTop": "4px",
-                                }
-                            },
-                        },
+                            "text": f"IP 获取异常：{self._ip_error}",
+                        }
                     ],
                 }
-            ],
-        }
+            )
+
+        # ---- 扫码登录区（仅失效时）----
+        if self._enabled and not self._cookie_valid and os.path.exists(self._qr_path):
+            try:
+                import base64
+
+                with open(self._qr_path, "rb") as file:
+                    encoded = base64.b64encode(file.read()).decode("utf-8")
+                blocks.append(
+                    {
+                        "component": "div",
+                        "props": {"style": "margin-top: 14px; text-align: center;"},
+                        "content": [
+                            {
+                                "component": "div",
+                                "props": {"style": f"font-size: 13px; {muted} margin-bottom: 8px;"},
+                                "text": "扫描二维码登录企业微信",
+                            },
+                            {
+                                "component": "img",
+                                "props": {
+                                    "src": f"data:image/png;base64,{encoded}",
+                                    "style": (
+                                        "max-width: 220px; width: 100%; border-radius: 10px; "
+                                        "display: block; margin: 0 auto;"
+                                    ),
+                                },
+                            },
+                        ],
+                    }
+                )
+            except Exception:
+                pass
+
+        # ---- 明细（可折叠；无明细时隐藏）----
+        if self._sync_detail:
+            detail_rows = []
+            for item in self._sync_detail:
+                good = "成功" in item
+                detail_rows.append(
+                    {
+                        "component": "div",
+                        "props": {
+                            "style": (
+                                "display: flex; align-items: flex-start; gap: 8px; "
+                                "padding: 7px 0; "
+                                "border-bottom: 1px solid rgba(var(--v-theme-on-surface), .07);"
+                            )
+                        },
+                        "content": [
+                            {
+                                "component": "VIcon",
+                                "props": {
+                                    "size": 16,
+                                    "style": f"color: {ok if good else warn}; margin-top: 2px; flex: 0 0 auto;",
+                                },
+                                "text": "mdi-check" if good else "mdi-alert",
+                            },
+                            {
+                                "component": "div",
+                                "props": {"style": f"font-size: 12.5px; color: {on_surface}; line-height: 1.5;"},
+                                "text": item,
+                            },
+                        ],
+                    }
+                )
+            blocks.append(
+                {
+                    "component": "div",
+                    "props": {
+                        "style": (
+                            f"margin-top: 14px; padding: 4px 14px 12px; border-radius: 12px; "
+                            f"background-color: rgba(var(--v-theme-on-surface), .03); "
+                            f"border: 1px solid rgba(var(--v-theme-on-surface), .08);"
+                        )
+                    },
+                    "content": [
+                        {
+                            "component": "div",
+                            "props": {
+                                "style": (
+                                    f"font-size: 12px; font-weight: 600; {muted} "
+                                    f"padding: 8px 0 4px; letter-spacing: .3px;"
+                                )
+                            },
+                            "text": f"同步明细 · {self._sync_at or '—'}",
+                        },
+                        *detail_rows,
+                    ],
+                }
+            )
+
+        # ---- 来源脚注 ----
+        blocks.append(
+            {
+                "component": "div",
+                "props": {"style": f"margin-top: 12px; font-size: 11px; {muted} line-height: 1.7;"},
+                "content": [
+                    {"component": "div", "text": f"IP 来源：{self._ip_source or '未检测'}"},
+                    {
+                        "component": "div",
+                        "text": f"检测时间：{self._ip_checked_at or '—'}　同步时间：{self._sync_at or '—'}",
+                    },
+                ],
+            }
+        )
+
+        return blocks
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
-        """插件配置页。"""
+        """插件配置页：分组卡片 + 折叠次要项。"""
         return [
             {
                 "component": "VForm",
                 "content": [
+                    # ---- 总开关区 ----
                     {
-                        "component": "VRow",
+                        "component": "VCard",
+                        "props": {"variant": "tonal", "color": "primary", "class": "mb-3"},
                         "content": [
-                            self._switch_col("enabled", "启用插件"),
-                            self._switch_col("onlyonce", "立即检测一次"),
-                            self._switch_col("notify", "发送通知"),
-                            self._switch_col("overwrite", "覆盖模式"),
+                            {
+                                "component": "VCardText",
+                                "props": {"class": "d-flex align-center flex-wrap ga-4 py-3"},
+                                "content": [
+                                    {
+                                        "component": "VIcon",
+                                        "props": {"size": 30},
+                                        "text": "mdi-shield-check-outline",
+                                    },
+                                    {
+                                        "component": "div",
+                                        "props": {"class": "min-w-0"},
+                                        "content": [
+                                            {
+                                                "component": "div",
+                                                "props": {"class": "text-subtitle-1 font-weight-bold"},
+                                                "text": "企业微信可信IP助手",
+                                            },
+                                            {
+                                                "component": "div",
+                                                "props": {"class": "text-caption"},
+                                                "text": "IP 变化时自动写入企业微信应用的可信IP白名单",
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
                         ],
                     },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            self._switch_col("use_cookiecloud", "使用CookieCloud"),
-                            self._switch_col("schedule_login", "Cookie失效自动登录"),
-                            self._switch_col("debug", "调试日志"),
+                    # ---- 基础开关 ----
+                    self._section(
+                        "mdi-cog-outline",
+                        "基础设置",
+                        [
+                            self._switch_col("enabled", "启用插件", 3),
+                            self._switch_col("onlyonce", "立即检测一次", 3),
+                            self._switch_col("notify", "发送通知", 3),
+                            self._switch_col("debug", "调试日志", 3),
                         ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            self._text_col("check_cron", "IP检测周期", "*/11 * * * *", 6),
-                            self._text_col("keepalive_cron", "Cookie保活周期", "*/5 * * * *", 6),
+                    ),
+                    # ---- 同步行为 ----
+                    self._section(
+                        "mdi-swap-vertical",
+                        "同步行为",
+                        [
+                            self._switch_col("overwrite", "覆盖已有IP（关闭则追加）", 6),
+                            self._switch_col("use_cookiecloud", "从 CookieCloud 获取 Cookie", 6),
                         ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            self._text_col("status_cron", "失效通知周期（关闭自动登录时生效）", "0 * * * *", 6),
-                            self._text_col("http_timeout", "HTTP超时（秒）", "15", 3),
-                            self._text_col("browser_timeout", "浏览器超时（秒）", "180", 3),
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
+                    ),
+                    # ---- 必填 ----
+                    self._section(
+                        "mdi-link-variant",
+                        "应用地址（必填）",
+                        [
                             {
                                 "component": "VCol",
                                 "props": {"cols": 12},
@@ -1289,92 +1467,166 @@ class WeComIPGuard(_PluginBase):
                                         "component": "VTextarea",
                                         "props": {
                                             "model": "wechat_url",
-                                            "label": "必填：企业微信应用管理网址",
+                                            "label": "企业微信应用管理网址",
                                             "rows": 2,
-                                            "placeholder": "多个地址用英文逗号分隔，如 https://work.weixin.qq.com/wework_admin/frame#/apps/modApiApp/00000000000",
+                                            "variant": "outlined",
+                                            "density": "comfortable",
+                                            "placeholder": "多个地址用英文逗号分隔\nhttps://work.weixin.qq.com/wework_admin/frame#/apps/modApiApp/00000000000",
+                                            "hint": "在企业微信管理后台 → 应用管理 → 打开任一应用的「网页授权及JS-SDK」页面，复制地址栏",
+                                            "persistent-hint": True,
                                         },
                                     }
                                 ],
                             }
                         ],
-                    },
+                    ),
+                    # ---- 折叠：高级 ----
                     {
-                        "component": "VRow",
+                        "component": "VExpansionPanels",
+                        "props": {"variant": "accordion", "class": "mb-3"},
                         "content": [
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12},
+                                "component": "VExpansionPanel",
+                                "props": {"title": "定时与超时", "elevation": 0},
                                 "content": [
                                     {
-                                        "component": "VTextarea",
-                                        "props": {
-                                            "model": "cookie_header",
-                                            "label": "非必填：手动 Cookie（HeaderString 格式）",
-                                            "rows": 2,
-                                            "placeholder": "仅在使用 CookieCloud 和自动登录都不方便时填写",
-                                        },
+                                        "component": "VExpansionPanelText",
+                                        "content": [
+                                            {
+                                                "component": "VRow",
+                                                "content": [
+                                                    self._text_col("check_cron", "IP 检测周期", "*/11 * * * *", 6),
+                                                    self._text_col("keepalive_cron", "Cookie 保活周期", "*/5 * * * *", 6),
+                                                ],
+                                            },
+                                            {
+                                                "component": "VRow",
+                                                "content": [
+                                                    self._text_col("status_cron", "失效通知周期", "0 * * * *", 4),
+                                                    self._text_col("http_timeout", "HTTP 超时（秒）", "15", 4),
+                                                    self._text_col("browser_timeout", "浏览器超时（秒）", "180", 4),
+                                                ],
+                                            },
+                                        ],
                                     }
                                 ],
-                            }
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
+                            },
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12},
+                                "component": "VExpansionPanel",
+                                "props": {"title": "Cookie 与登录", "elevation": 0},
                                 "content": [
                                     {
-                                        "component": "VTextarea",
-                                        "props": {
-                                            "model": "ip_urls",
-                                            "label": "非必填：自定义IP源（逗号分隔）",
-                                            "rows": 2,
-                                            "placeholder": "留空使用内置源：ddns.oray.com/checkip、ipv4.icanhazip.com、v4.ipip.net、ipinfo.io/ip",
-                                        },
+                                        "component": "VExpansionPanelText",
+                                        "content": [
+                                            {
+                                                "component": "VRow",
+                                                "content": [
+                                                    {
+                                                        "component": "VCol",
+                                                        "props": {"cols": 12},
+                                                        "content": [
+                                                            {
+                                                                "component": "VTextarea",
+                                                                "props": {
+                                                                    "model": "cookie_header",
+                                                                    "label": "手动 Cookie（非必填）",
+                                                                    "rows": 2,
+                                                                    "variant": "outlined",
+                                                                    "placeholder": "HeaderString 格式，如 a=1; b=2",
+                                                                    "hint": "仅在 CookieCloud 与自动登录都不方便时填写",
+                                                                    "persistent-hint": True,
+                                                                },
+                                                            }
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                "component": "VRow",
+                                                "content": [
+                                                    self._switch_col("schedule_login", "Cookie 失效后自动登录", 12),
+                                                ],
+                                            },
+                                            {
+                                                "component": "VRow",
+                                                "content": [
+                                                    {
+                                                        "component": "VCol",
+                                                        "props": {"cols": 12},
+                                                        "content": [
+                                                            {
+                                                                "component": "VTextarea",
+                                                                "props": {
+                                                                    "model": "qr_send_users",
+                                                                    "label": "接收登录二维码的成员ID（非必填）",
+                                                                    "rows": 1,
+                                                                    "variant": "outlined",
+                                                                    "placeholder": "留空则发送给全部成员",
+                                                                    "hint": "企业微信 → 管理企业 → 成员与部门管理 → 成员详情 → 账号",
+                                                                    "persistent-hint": True,
+                                                                },
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
                                     }
                                 ],
-                            }
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
+                            },
                             {
-                                "component": "VCol",
-                                "props": {"cols": 12},
+                                "component": "VExpansionPanel",
+                                "props": {"title": "高级：自定义 IP 源", "elevation": 0},
                                 "content": [
                                     {
-                                        "component": "VTextarea",
-                                        "props": {
-                                            "model": "qr_send_users",
-                                            "label": "非必填：接收登录二维码的成员ID",
-                                            "rows": 1,
-                                            "placeholder": "留空发送给全部成员；ID 见 企业微信-管理企业-成员与部门管理-账号",
-                                        },
+                                        "component": "VExpansionPanelText",
+                                        "content": [
+                                            {
+                                                "component": "VRow",
+                                                "content": [
+                                                    {
+                                                        "component": "VCol",
+                                                        "props": {"cols": 12},
+                                                        "content": [
+                                                            {
+                                                                "component": "VTextarea",
+                                                                "props": {
+                                                                    "model": "ip_urls",
+                                                                    "label": "自定义 IP 源",
+                                                                    "rows": 2,
+                                                                    "variant": "outlined",
+                                                                    "placeholder": "ddns.oray.com/checkip、ipv4.icanhazip.com、v4.ipip.net、ipinfo.io/ip",
+                                                                    "hint": "留空使用内置 IPv4 专用源；多个用英文逗号分隔",
+                                                                    "persistent-hint": True,
+                                                                },
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
                                     }
                                 ],
-                            }
+                            },
                         ],
                     },
+                    # ---- 使用提示 ----
                     {
-                        "component": "VRow",
-                        "content": [
-                            self._alert("Cookie保活优先走纯HTTP探活，只有探活失败才启动浏览器内核，可显著降低CPU占用。"),
-                        ],
+                        "component": "VAlert",
+                        "props": {
+                            "type": "info",
+                            "variant": "tonal",
+                            "class": "mb-2",
+                            "text": "登录态失效后，向 MoviePilot 应用回复 #登录企业微信 重新扫码；若需手机验证，按 #123456 格式回复验证码。",
+                        },
                     },
                     {
-                        "component": "VRow",
-                        "content": [
-                            self._alert("覆盖模式开启时直接覆写可信IP；关闭时按分号追加新IP。"),
-                        ],
-                    },
-                    {
-                        "component": "VRow",
-                        "content": [
-                            self._alert("Cookie失效后回复 #登录企业微信 可重新扫码；手机验证码按 #123456 格式回复。"),
-                        ],
+                        "component": "VAlert",
+                        "props": {
+                            "type": "info",
+                            "variant": "tonal",
+                            "text": "Cookie 保活优先使用 HTTP 请求探活，只有探活失败才启动浏览器内核，常态下几乎不占用 CPU。",
+                        },
                     },
                 ],
             }
@@ -1398,12 +1650,43 @@ class WeComIPGuard(_PluginBase):
         }
 
     @staticmethod
-    def _switch_col(model: str, label: str) -> dict:
+    def _section(icon: str, title: str, items: List[dict]) -> dict:
+        """生成一个带标题图标的分区卡片。"""
+        return {
+            "component": "VCard",
+            "props": {"variant": "outlined", "class": "mb-3"},
+            "content": [
+                {
+                    "component": "VCardText",
+                    "props": {"class": "pa-4"},
+                    "content": [
+                        {
+                            "component": "div",
+                            "props": {
+                                "class": "d-flex align-center ga-2 mb-3",
+                            },
+                            "content": [
+                                {"component": "VIcon", "props": {"size": 18, "color": "primary"}, "text": icon},
+                                {
+                                    "component": "div",
+                                    "props": {"class": "text-subtitle-2 font-weight-bold"},
+                                    "text": title,
+                                },
+                            ],
+                        },
+                        {"component": "VRow", "content": items},
+                    ],
+                }
+            ],
+        }
+
+    @staticmethod
+    def _switch_col(model: str, label: str, md: int = 3) -> dict:
         return {
             "component": "VCol",
-            "props": {"cols": 12, "md": 3},
+            "props": {"cols": 12, "md": md},
             "content": [
-                {"component": "VSwitch", "props": {"model": model, "label": label}}
+                {"component": "VSwitch", "props": {"model": model, "label": label, "density": "comfortable"}}
             ],
         }
 
@@ -1415,17 +1698,13 @@ class WeComIPGuard(_PluginBase):
             "content": [
                 {
                     "component": "VTextField",
-                    "props": {"model": model, "label": label, "placeholder": placeholder},
+                    "props": {
+                        "model": model,
+                        "label": label,
+                        "placeholder": placeholder,
+                        "variant": "outlined",
+                        "density": "comfortable",
+                    },
                 }
-            ],
-        }
-
-    @staticmethod
-    def _alert(text: str) -> dict:
-        return {
-            "component": "VCol",
-            "props": {"cols": 12},
-            "content": [
-                {"component": "VAlert", "props": {"type": "info", "variant": "tonal", "text": text}}
             ],
         }
